@@ -172,6 +172,20 @@
         updateRefValue(notificationStatus, props.modelValue.notificationStatus ?? "");
     });
 
+    // Watch for job type changes to auto-populate name and description
+    watch(() => jobTypeClass.value, async (newJobType) => {
+        if (newJobType) {
+            const response = await invokeBlockAction<ServiceJobBag>("GetJobTypeDetails", {
+                jobType: newJobType
+            });
+
+            if (response.isSuccess && response.data) {
+                name.value = response.data.name ?? "";
+                description.value = response.data.description ?? "";
+            }
+        }
+    });
+
     // Determines which values we want to track changes on (defined in the
     // array) and then emit a new object defined as newValue.
     watch([attributeValues, ...propRefs], () => {

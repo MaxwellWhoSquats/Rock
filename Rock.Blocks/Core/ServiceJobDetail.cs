@@ -583,6 +583,34 @@ namespace Rock.Blocks.Core
             } );
         }
 
+        /// <summary>
+        /// Gets the job type details for a selected job type.
+        /// </summary>
+        /// <param name="jobType">The fully qualified class name of the job type.</param>
+        /// <returns>A ServiceJobBag with the job type details.</returns>
+        [BlockAction]
+        public BlockActionResult GetJobTypeDetails( string jobType )
+        {
+            if ( string.IsNullOrWhiteSpace( jobType ) )
+            {
+                return ActionBadRequest( "Job type is required." );
+            }
+
+            var jobTypeInstance = Rock.Reflection.FindType( typeof( Rock.Jobs.RockJob ), jobType );
+            if ( jobTypeInstance == null )
+            {
+                return ActionBadRequest( "Job type not found." );
+            }
+
+            var bag = new ServiceJobBag
+            {
+                Name = jobTypeInstance.GetCustomAttribute<System.ComponentModel.DisplayNameAttribute>()?.DisplayName,
+                Description = jobTypeInstance.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description
+            };
+
+            return ActionOk(bag);
+        }
+
         #endregion
     }
 }
