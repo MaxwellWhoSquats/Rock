@@ -296,17 +296,22 @@ Per-phase verification lives in each phase spec.
 
 ## Phase 0 session checklist
 
-When the user runs the Phase 0 session, this document is the working surface. Steps:
+When the user runs the Phase 0 session, this document is the working surface. The session follows [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) opening + closing steps (Phase 0 is spec-only so it skips the implementation and build sections).
 
-1. Read this document end to end.
-2. Read both research halves end to end (or selectively; the doc links each region).
-3. Resolve Q1-Q12 by direct user input.
-4. Update this document to record each resolution (replace "Default recommendation" with "Resolved: <decision>").
-5. Mark this document as locked at the bottom of the file.
-6. Optionally: author `01-phase-1-shell-and-view.md` while context is fresh, OR defer to the Phase 1 session.
-7. Commit and end the session.
+Steps:
 
-After Phase 0, every later phase reads this locked document at session start.
+1. Read [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) (this is the procedure for every session).
+2. Read [PHASE-SPEC-TEMPLATE.md](PHASE-SPEC-TEMPLATE.md) (this is the template you'll use to author the Phase 1 spec).
+3. Read this document end to end.
+4. Read [ROADMAP.md](ROADMAP.md).
+5. Read both research halves end to end (or selectively; the doc links each region).
+6. Resolve Q1-Q12 by direct user input. For each: state the question, summarize the default recommendation, ask for confirm/override, update the spec to record the resolution.
+7. Mark this document's status as `Locked` at the bottom.
+8. Author `01-phase-1-shell-and-view.md` using PHASE-SPEC-TEMPLATE.md as the starting structure. Pay special attention to the "Research coverage" and "Implementation checklist" sections — these drive the self-review at session close, so they must be specific.
+9. Update [INDEX.md](INDEX.md): mark architecture as `locked`, mark Phase 1 spec as `draft` awaiting user review.
+10. Commit per `/commit`. Recommended message: `- (Group) Phase 0: Architecture spec locked + Phase 1 implementation spec drafted.`
+
+After Phase 0, every later phase reads this locked document at session start, follows SESSION-PROTOCOL.md, and produces a coverage report at session close.
 
 ## Status
 

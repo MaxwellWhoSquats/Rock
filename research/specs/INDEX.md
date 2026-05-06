@@ -17,25 +17,30 @@ If you are starting a new phase session, the opening prompt should always includ
 
 ## Reading order
 
-1. **[ROADMAP.md](ROADMAP.md)** — strategic plan, phase rationale, alternatives considered, risks. Read once when joining the effort.
-2. **[00-architecture.md](00-architecture.md)** — locked cross-phase decisions (block class shape, GUID strategy, IdKey policy, etc.). Read every session.
-3. This file (`INDEX.md`) — current phase status. Read every session.
-4. The current phase's spec — the work for this session.
-5. Research files — read as referenced.
+1. **[SESSION-PROTOCOL.md](SESSION-PROTOCOL.md)** — the procedural checklist every session must follow. Opening, implementation, self-review, closing. Read first, every session.
+2. **[ROADMAP.md](ROADMAP.md)** — strategic plan, phase rationale, alternatives considered, risks. Read once when joining the effort.
+3. **[00-architecture.md](00-architecture.md)** — locked cross-phase decisions (block class shape, GUID strategy, IdKey policy, etc.). Read every session.
+4. This file (`INDEX.md`) — current phase status. Read every session.
+5. The current phase's spec — the work for this session.
+6. Research files — read in full as listed under the phase spec's "Research coverage" section.
+
+[PHASE-SPEC-TEMPLATE.md](PHASE-SPEC-TEMPLATE.md) is the template every phase spec must follow. Read it when authoring a new phase spec (per SESSION-PROTOCOL.md Section D5).
 
 ## Current state
 
-| # | Spec | Status | Completed in commit | Notes |
-|---|---|---|---|---|
-| — | [ROADMAP.md](ROADMAP.md) | locked | — | Strategic phase plan |
-| 00 | [00-architecture.md](00-architecture.md) | **draft** | — | Q1-Q12 awaiting Phase 0 session |
-| 01 | `01-phase-1-shell-and-view.md` | not authored | — | Authored at end of Phase 0 |
-| 02 | `02-phase-2-edit-core.md` | not authored | — | Authored at end of Phase 1 |
-| 03 | `03-phase-3-attributes.md` | not authored | — | Authored at end of Phase 2 |
-| 04 | `04-phase-4-requirements-sync-workflows.md` | not authored | — | Authored at end of Phase 3 |
-| 05 | `05-phase-5-locations-schedules.md` | not authored | — | Authored at end of Phase 4 |
-| 06 | `06-phase-6-new-features.md` | conditional | — | Likely empty unless Trailblazer Settings adds scope |
-| 07 | `07-cutover.md` | not authored | — | Authored at end of Phase 5 (or 6 if used) |
+| # | Spec | Status | Completion date | Commit | Notes |
+|---|---|---|---|---|---|
+| — | [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) | locked | 2026-05-06 | — | Procedural contract for every session |
+| — | [PHASE-SPEC-TEMPLATE.md](PHASE-SPEC-TEMPLATE.md) | locked | 2026-05-06 | — | Template for every phase spec |
+| — | [ROADMAP.md](ROADMAP.md) | locked | 2026-05-06 | — | Strategic phase plan |
+| 00 | [00-architecture.md](00-architecture.md) | **draft** | — | — | Q1-Q12 awaiting Phase 0 session |
+| 01 | `01-phase-1-shell-and-view.md` | not authored | — | — | Authored at end of Phase 0 |
+| 02 | `02-phase-2-edit-core.md` | not authored | — | — | Authored at end of Phase 1 |
+| 03 | `03-phase-3-attributes.md` | not authored | — | — | Authored at end of Phase 2 |
+| 04 | `04-phase-4-requirements-sync-workflows.md` | not authored | — | — | Authored at end of Phase 3 |
+| 05 | `05-phase-5-locations-schedules.md` | not authored | — | — | Authored at end of Phase 4 |
+| 06 | `06-phase-6-new-features.md` | conditional | — | — | Likely empty unless Trailblazer Settings adds scope |
+| 07 | `07-cutover.md` | not authored | — | — | Authored at end of Phase 5 (or 6 if used) |
 
 Status legend:
 - **not authored** — file does not exist yet
@@ -60,23 +65,16 @@ The user reviews each newly-drafted spec in the gap between sessions before the 
 
 ## Per-session protocol
 
-Every implementation phase runs in a fresh Claude session. Opening prompt must include:
+The opening prompt for every session is one line:
 
-1. Path to [ROADMAP.md](ROADMAP.md) (read for context).
-2. Path to [00-architecture.md](00-architecture.md) (locked, read first).
-3. Path to this `INDEX.md` (current status).
-4. Path to that phase's implementation spec.
-5. Pointers to relevant `research/webforms/` and `research/design/` files.
-6. Directive: "implement only the scope defined in the phase spec; flag any ambiguity and stop for clarification."
+> Follow `research/specs/SESSION-PROTOCOL.md` to run Phase N for the GroupDetail conversion.
 
-After implementation, the session ends with:
+The protocol file enforces opening (Section A), implementation (Section B), self-review (Section C — the completeness check that produces a coverage report), and closing (Section D). The user reviews per Section E between sessions.
 
-1. Build verification (`/build`).
-2. Manual test pointers from the spec.
-3. A "Completed" section appended to the phase spec recording what was actually built and any deviations.
-4. Update this `INDEX.md`: change phase status to `completed`, fill in the commit hash.
-5. Draft the NEXT phase's spec (so it's ready for review).
-6. Commit per `/commit`.
+The completeness contract is:
+- Each phase spec has a "Research coverage" list and an "Implementation checklist".
+- The model's self-review walks both at session close and produces a coverage report classifying every research-derived behavior as ✓ implemented, → deferred, or ✗ missed.
+- A phase does not close while any ✗ missed exists.
 
 ## Conventions
 
