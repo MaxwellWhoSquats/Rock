@@ -4,7 +4,7 @@ This file enumerates everything the new design adds that does NOT exist in the W
 
 | # | Feature | UI location | Data / service requirements | Phase recommendation |
 |---|---|---|---|---|
-| 1 | **Group Image** (16:9 ratio uploader) | Edit Section 1 (top fields); View Overview card top | Either reuse `Group.PhotoId` (existing column) or add new column. Image uploader bound to BinaryFile entity. IsTemporary toggle on save. View renders if image present, omits region entirely if not. | Phase 2 (core edit fields) — folds into the same image-uploader work as the chat avatar. |
+| 1 | **Group Image** (16:9 ratio uploader) | Edit Section 1 (top fields); View Overview card top | Group has no photo column today; a new `Group.PhotoId` (nullable int → BinaryFile, mirroring `Person.PhotoId` at [Person.cs:242](Rock/Model/CRM/Person/Person.cs:242)) is added in Phase 2 with a migration + EntityTypeConfiguration nav property + codegen regen. Image uploader bound to the new BinaryFile FK. `IsTemporary` toggle on save (chat-avatar pattern). View renders if image present, omits region entirely if not. See 00-architecture.md Q8. | Phase 2 (core edit fields) — folds into the same image-uploader work as the chat avatar. |
 | 2 | **Audit Details modal** (replaces audit drawer) | Header kebab menu → "Audit Details" item | Modal showing CreatedDateTime, ModifiedDateTime, CreatedByPersonAlias, ModifiedByPersonAlias, plus probably history rows. Replaces `PanelDrawer pdAuditDetails`. | Phase 1 (shell + view) — the audit drawer was in the shell phase. |
 | 3 | **Public state subheader label** | View panel subheader, beside relationship strength + tags | New "Public" pill chip when `IsPublic == true`. Uses existing field. | Phase 1 (shell + view). |
 | 4 | **Group Tools card with sub-headers** | View panel right column | Replaces hyperlink toolbar in WebForms footer. Sub-headers ("Participation", "Views") group the quick-link items. Each item is conditional on the corresponding LinkedPage block setting AND the corresponding GroupType flag. | Phase 1 (shell + view). |
@@ -24,7 +24,7 @@ This file enumerates everything the new design adds that does NOT exist in the W
 | 18 | **"Trailblazer Settings"** | Unknown | Listed as "New" by designer; not visible in captured frames. **Open question** — see [00-overview.md](00-overview.md). | TBD pending clarification. |
 | 19 | **Block settings reorganization into named sections** | Block Settings panel (admin) | Two named sections: General Settings + Page Routing. Several attribute labels renamed (underlying keys preserved). | Phase 1 — implemented when block attributes are declared on the C# class. |
 | 20 | **Linked Administrator and Parent Group in Overview** | View panel Overview card | Both render as clickable links to person profile / group detail. WebForms shows them as plain text inside the Lava template. | Phase 1 (shell + view). |
-| 21 | **Group Image displayed in 16:9 hero in Overview** | View panel Overview card top | Renders `Group.PhotoId` (or new field) as the visual hero. If no image, region omitted entirely (no placeholder). | Phase 1 (shell + view). |
+| 21 | **Group Image displayed in 16:9 hero in Overview** | View panel Overview card top | Renders `Group.PhotoId` (new column, added in Phase 2) as the visual hero. If no image, region omitted entirely (no placeholder). Phase 1 ships the View hero region wired up; until Phase 2 adds the column, the bag's photo URL is always null and the region always omits. | Phase 1 (shell + view) wires the render; Phase 2 adds the column itself. |
 | 22 | **Compact / minimal-data view state** | View panel | When the group has no locations, no linkages, minimal attributes, the right column collapses to just Group Tools (single sub-header, fewer items). Designer's alt state shows this. Two-column layout maintained. | Phase 1 (shell + view). |
 
 ## Behavior changes (not strictly net-new but worth flagging)
@@ -65,7 +65,7 @@ The most consequential additions for spec scope:
 ## Open questions / flag for spec phase
 
 1. **Trailblazer Settings**: missing visual definition.
-2. **Image data source**: `Group.PhotoId` or new column.
+2. **Image data source**: resolved by 00-architecture.md Q8: new `Group.PhotoId` column added in Phase 2 mirroring `Person.PhotoId`.
 3. **Audit modal contents**: not captured in design.
 4. **Compact-state right-column behavior**: stay or collapse-and-fill.
 5. **Sync Frequency component**: build new or restyle existing.

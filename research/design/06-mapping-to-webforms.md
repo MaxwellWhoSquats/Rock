@@ -173,7 +173,7 @@ Recommended phase-by-phase deltas (in addition to the existing plan):
 
 1. **Designer-flagged "Trailblazer Settings"** — unknown reference. Spec phase needs clarification.
 2. **Audit modal scope** — content not captured.
-3. **Group Image data source** — `Group.PhotoId` or new column.
+3. **Group Image data source** — resolved by 00-architecture.md Q8: Group has no photo column today; a new `Group.PhotoId` (mirroring `Person.PhotoId`) is added in Phase 2.
 4. **Sync Frequency component approach** — build vs reuse.
 5. **Group attribute category source** — `Attribute.Category` or designer-set captions.
 6. **Member Workflows reorder** — preserve or drop.

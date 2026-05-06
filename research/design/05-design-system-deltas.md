@@ -111,7 +111,7 @@ WebForms uses three-option dropdowns ("Inherit from Group Type" / "No" / "Yes") 
 
 | Field | WebForms data | Design data | Notes |
 |---|---|---|---|
-| Group image | (probably not used by GroupDetail) | First-class image with Upload button | Confirm whether `Group.PhotoId` (existing nullable column) or new column. |
+| Group image | (no photo column on Group today) | First-class image with Upload button | New `Group.PhotoId` column added in Phase 2 mirroring `Person.PhotoId` ([Person.cs:242](Rock/Model/CRM/Person/Person.cs:242)). See 00-architecture.md Q8. |
 | Coordinator Notifications None | Explicit checkbox list entry, mutually exclusive | Implicit "no boxes ticked" | Save logic shifts: empty selection → `ScheduleCoordinatorNotificationType.None`. |
 | Sync Frequency | `ScheduleIntervalMinutes : int?` | Same field, but UI computes minutes from segmented unit + slider value | Bag shape unchanged. |
 | Group attributes by category | All in one DynamicPlaceholder | Per-category sub-stacks | Bag may need to expose `attributesByCategory: { categoryName, attributes }[]` or the Vue layer can group them client-side. |

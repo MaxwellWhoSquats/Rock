@@ -30,17 +30,18 @@ If you are starting a new phase session, the opening prompt should always includ
 
 | # | Spec | Status | Completion date | Commit | Notes |
 |---|---|---|---|---|---|
-| — | [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) | locked | 2026-05-06 | — | Procedural contract for every session |
-| — | [PHASE-SPEC-TEMPLATE.md](PHASE-SPEC-TEMPLATE.md) | locked | 2026-05-06 | — | Template for every phase spec |
-| — | [ROADMAP.md](ROADMAP.md) | locked | 2026-05-06 | — | Strategic phase plan |
-| 00 | [00-architecture.md](00-architecture.md) | **draft** | — | — | Q1-Q12 awaiting Phase 0 session |
-| 01 | `01-phase-1-shell-and-view.md` | not authored | — | — | Authored at end of Phase 0 |
-| 02 | `02-phase-2-edit-core.md` | not authored | — | — | Authored at end of Phase 1 |
-| 03 | `03-phase-3-attributes.md` | not authored | — | — | Authored at end of Phase 2 |
-| 04 | `04-phase-4-requirements-sync-workflows.md` | not authored | — | — | Authored at end of Phase 3 |
-| 05 | `05-phase-5-locations-schedules.md` | not authored | — | — | Authored at end of Phase 4 |
-| 06 | `06-phase-6-new-features.md` | conditional | — | — | Likely empty unless Trailblazer Settings adds scope |
-| 07 | `07-cutover.md` | not authored | — | — | Authored at end of Phase 5 (or 6 if used) |
+| - | [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) | locked | 2026-05-06 | - | Procedural contract for every session |
+| - | [PHASE-SPEC-TEMPLATE.md](PHASE-SPEC-TEMPLATE.md) | locked | 2026-05-06 | - | Template for every phase spec |
+| - | [ROADMAP.md](ROADMAP.md) | locked | 2026-05-06 | - | Strategic phase plan |
+| 00 | [00-architecture.md](00-architecture.md) | **locked** | 2026-05-06 | - | Q1-Q12 resolved during the Phase 0 session |
+| 01 | [01-phase-1-shell-and-view.md](01-phase-1-shell-and-view.md) | **draft** | - | - | Drafted at end of the Phase 0 session; awaiting user review before Phase 1 starts |
+| 02 | `02-phase-2-edit-core.md` | not authored | - | - | Authored at end of Phase 1 |
+| 03 | `03-phase-3-attributes.md` | not authored | - | - | Authored at end of Phase 2 |
+| 04 | `04-phase-4-requirements-sync-workflows.md` | not authored | - | - | Authored at end of Phase 3 |
+| 05 | `05-phase-5-locations-schedules.md` | not authored | - | - | Authored at end of Phase 4 |
+| 06 | `06-phase-6-new-features.md` | conditional | - | - | Likely empty: Q6 confirmed Trailblazer Settings is a per-field prop on General-section controls (Phase 2), not a separate feature |
+| 07 | `07-phase-7-update-dependencies.md` | not authored | - | - | NEW phase per Q4: update the 5 still-WebForms outbound destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) to accept IdKey on `GroupId`. Authored at end of Phase 5 (or 6 if used). |
+| 08 | `08-cutover.md` | not authored | - | - | Authored at end of Phase 7. Verify chop, delete WebForms files, smoke test cross-block callers, release notes. |
 
 Status legend:
 - **not authored** — file does not exist yet
@@ -54,12 +55,13 @@ Status legend:
 Phase specs are NOT authored upfront. Each phase's spec is drafted at the END of the prior phase's session, while context on what just shipped is fresh.
 
 Sequence:
-1. **Phase 0 session** outputs `00-architecture.md` (locked) + `01-phase-1-shell-and-view.md` (locked).
-2. **Phase 1 session** implements per the Phase 1 spec, then drafts `02-phase-2-edit-core.md` as its closing step.
-3. **Phase 2 session** reviews + locks the Phase 2 spec at session start (with user approval), implements, then drafts `03-phase-3-attributes.md`.
+1. **Phase 0 session** outputs `00-architecture.md` (locked) + `01-phase-1-shell-and-view.md` (draft awaiting user review).
+2. **Phase 1 session** locks the Phase 1 spec at session start (with user approval), implements per the spec, then drafts `02-phase-2-edit-core.md` as its closing step.
+3. **Phase 2 session** locks the Phase 2 spec at session start, implements, then drafts `03-phase-3-attributes.md`.
 4. Same pattern through Phase 5.
-5. **Phase 6** runs only if Trailblazer Settings or other Figma items demand net-new work.
-6. **Phase 7** is the cutover — verify chop, delete WebForms files, smoke test, release notes.
+5. **Phase 6** runs only if Trailblazer Settings or other Figma items demand net-new work. (Per Q6, Trailblazer is now scoped into Phase 2 as a per-field prop, so Phase 6 is currently expected to be empty.)
+6. **Phase 7** is the dependencies update: the 5 still-WebForms outbound destinations are updated to accept IdKey on their `GroupId` page parameter (per Q4).
+7. **Phase 8** is the cutover: verify chop, delete WebForms files, smoke test, release notes.
 
 The user reviews each newly-drafted spec in the gap between sessions before the next session starts.
 

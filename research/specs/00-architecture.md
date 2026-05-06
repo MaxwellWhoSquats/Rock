@@ -47,7 +47,7 @@ Research finding: dead code with no observable consumers.
 
 **Open question:** with the deep-research data in hand, does the user revise the decision?
 
-**Default recommendation:** drop. Saves shell complexity in Phase 1.
+**Resolved:** drop. Research confirmed zero callers and no `this.Entity` reads, so the attribute and base class are dead weight; dropping simplifies the Phase 1 shell.
 
 ### Q2. GroupType-change reactive cascade — Approach A, B, or C?
 
@@ -59,23 +59,19 @@ Research finding: dead code with no observable consumers.
 | B: Server round-trip per change | Smaller payload, ~50-300ms latency per change |
 | C: Hybrid — initial-current + lazy-cache on change | Best UX for "settle on right type" workflows; most code complexity |
 
-**Default recommendation:** Approach A for typical sites; treat C as known fallback if real-world data shows pain. Reference: GroupTypeDetail.cs already implements C with cycle guard.
+**Resolved:** Approach B (server round-trip per change). GroupType rarely changes mid-edit on real groups, so the initial-payload cost of Approach A is overkill; a single server fetch on change is the right tradeoff.
 
-### Q3. View panel — confirmed Pure Vue (no Lava)
+### Q3. View panel — Pure Vue (no Lava)
 
-**Resolved by user.** Pure Vue, no `GroupViewLavaTemplate`, no fallback. Customer customizations of the system setting `core_templates_GroupViewTemplate` will be lost on conversion; release notes must call this out. See [research/webforms/17-view-panel.md](../webforms/17-view-panel.md).
+**Resolved:** Pure Vue, no `GroupViewLavaTemplate`, no fallback. Confirmed by user. Customer customizations of the system setting `core_templates_GroupViewTemplate` will be lost on conversion; release notes must call this out. See [research/webforms/17-view-panel.md](../webforms/17-view-panel.md).
 
-### Q4. IdKey adoption — confirmed accept and write
+### Q4. IdKey adoption — accept and write, with a dedicated dependencies phase
 
-**Resolved by user.** GroupDetail accepts both integer Id and IdKey on inbound page parameters. GroupDetail writes IdKey on all outbound LinkedPage URLs. Five outbound destinations are still WebForms and integer-only (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage); they break if GroupDetail writes IdKey to them. See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md).
+**Resolved:** GroupDetail accepts both integer Id and IdKey on inbound page parameters and writes IdKey on **all 11** outbound LinkedPage URLs uniformly (no per-destination special-casing). The 5 still-WebForms destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) will break under IdKey URLs until they are updated to accept IdKey, which is now scoped as a new "Update dependencies" phase preceding cutover. See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md).
 
-**Open question:** for the 5 still-WebForms destinations, does the conversion (a) write integer specifically when targeting them, (b) update them to accept IdKey as part of this scope, or (c) defer those updates as separate follow-on work?
+### Q5. Block-type chop strategy — startup chop
 
-**Default recommendation:** (a) write integer specifically when targeting those 5 destinations, defer their IdKey acceptance as follow-on. The conversion stays scoped.
-
-### Q5. Block-type chop strategy — confirmed startup chop
-
-**Resolved by user.** No migration is written. The C# class declares:
+**Resolved:** No migration is written. The Rock startup chop replaces the WebForms BlockType row in place. Confirmed by user. The C# class declares:
 
 ```csharp
 [Rock.SystemGuid.EntityTypeGuid( "<NEW-GUID>" )]
@@ -86,29 +82,35 @@ public class GroupDetail : RockEntityDetailBlockType<Group, GroupBag>
 
 Run `node .claude/skills/convert-block/scripts/generate-guids.js` to obtain the new EntityTypeGuid and discarded BlockTypeGuid. Active BlockTypeGuid reuses the WebForms GUID `582BEEA1-5B27-444D-BC0A-F60CEB053981` (read from [GroupDetail.ascx.cs:190](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:190)). `BlockTypeService.StagePossibleMigrateWebFormsToObsidianBlock` performs the chop at Rock startup.
 
-### Q6. "Trailblazer Settings" — what is it?
+### Q6. "Trailblazer Settings" — visual-decoration prop, not a separate feature
 
 **Background.** Listed under "New" in the edit-mode designer notes in the Figma. No corresponding visual element observed in any captured screenshot. Could be a feature flag, a hidden region, or internal Triumph terminology.
 
-**Open question:** what does this refer to, and where does it live in the implementation?
-
-**Default recommendation:** flag for designer clarification; defer until clarified.
+**Resolved:** "Trailblazer" settings are individual fields that the Figma highlights in blue on the edit panel (advanced / power-user fields). User confirmed inspection of the Figma shows them only in the General content section. Implementation: the affected controls take a `trailBlazerField` prop that drives the blue-highlight styling. NOT a net-new feature, NOT a separate panel; Phase 2 (which owns the General section) wires this up where applicable. Phase 6 stays empty unless something else surfaces.
 
 ### Q7. Audit modal — content and visual
 
 **Background.** The view panel design replaces the WebForms audit drawer with an "Audit Details" modal opened from the panel-header kebab menu. The modal body is not in any captured Figma frame.
 
-**Open question:** is there a separate Figma frame for this modal? If not, what content goes in it?
+**Resolved:** The Figma does include the Audit Details frame; user supplied the screenshot. Trigger: kebab menu in the panel header with a single entry, "Audit Details" (no other kebab actions). Modal title: "Audit Details". Body is a single horizontal row with three columns:
+- **Created By**: person name + relative time (e.g., "Alisha Marble (1 month ago)").
+- **Modified By**: person name + relative time (e.g., "Alisha Marble (1 week ago)").
+- **Id**: the numeric `Group.Id` (display only; not the IdKey).
 
-**Default recommendation:** ask designer for a frame or content spec. As a fallback, port the existing audit-drawer content (Created / Modified date and person) into a vertical stack layout.
+The footer has standard Modal chrome (Cancel + Save shown in Figma; since the modal is read-only, Phase 1 ships with Cancel only; flag if a writable variant is intended later).
 
-### Q8. Group Image data source
+### Q8. Group Image data source — new column required
 
-**Background.** The redesign adds a 16:9 image at the top of the View panel Overview card and an image uploader in Edit Section 1. The Group entity has an existing `Group.PhotoId` (nullable int → BinaryFile).
+**Background.** The redesign adds a 16:9 image at the top of the View panel Overview card and an image uploader in Edit Section 1. **The Group entity does NOT currently have a photo column** (verified: grep for `Photo` in [Rock/Model/Group/Group/](Rock/Model/Group/Group/) returns zero matches). Earlier drafts of this spec and several design docs incorrectly assumed `Group.PhotoId` existed; that was a pattern-match from `Person.PhotoId` ([Person.cs:242](Rock/Model/CRM/Person/Person.cs:242)) and is not real. The only image-shaped FK on Group today is `ChatChannelAvatarBinaryFileId` ([Group.cs:623](Rock/Model/Group/Group/Group.cs:623)), which is chat-specific and not appropriate to reuse for the redesign hero image.
 
-**Open question:** is `Group.PhotoId` the right field, or does this require a new column?
+So this is not a "reuse vs. new" question; it is a "what do we name the new column" question.
 
-**Default recommendation:** reuse `Group.PhotoId`. Apply the same `IsTemporary` toggle pattern used for the chat-channel-avatar binary file. See [research/webforms/14-chat.md](../webforms/14-chat.md) and [research/webforms/23-validations-and-cascades.md](../webforms/23-validations-and-cascades.md).
+| Option | Name | Argument |
+|---|---|---|
+| **(a)** | `PhotoId` (int? → BinaryFile) | Mirrors `Person.PhotoId`. Per the Prime Directive (follow existing patterns), this is the cross-Rock convention for "primary entity image." |
+| **(b)** | `HeroImageBinaryFileId` (int? → BinaryFile) | Group-internal-consistent with `ChatChannelAvatarBinaryFileId`. More descriptive of intent (the image is a 16:9 hero, not a person-style headshot). |
+
+**Resolved:** Add `Group.PhotoId` (nullable int → BinaryFile, FK with `WillCascadeOnDelete(false)` and `ON DELETE SET NULL` per data-model rules), mirroring `Person.PhotoId`. Per the Prime Directive, follow the existing cross-Rock convention. Apply the same `IsTemporary` toggle pattern the chat-channel-avatar uses for orphan cleanup. The column add (entity + migration + EntityTypeConfiguration nav property + codegen regen) lands in **Phase 2** alongside the chat-avatar editing work. See [research/webforms/14-chat.md](../webforms/14-chat.md) and [research/webforms/23-validations-and-cascades.md](../webforms/23-validations-and-cascades.md). Phase 1 (View panel) wires up the hero region but the bag's photo URL is always null until Phase 2 ships, so the region omits during the gap.
 
 ### Q9. Sync Frequency control
 
@@ -116,15 +118,17 @@ Run `node .claude/skills/convert-block/scripts/generate-guids.js` to obtain the 
 
 **Open question:** build a new dedicated component, restyle `IntervalPicker`, or inline a segmented control plus a basic `<RangeSlider>`?
 
-**Default recommendation:** build a new component scoped to this single modal during Phase 4. The unified visual is a clear net improvement and the cost is bounded.
+**Resolved:** Reuse the existing Obsidian `<IntervalPicker>` (option b). It already supports the Mins / Hours / Days unit segmentation natively; the work is purely a styling change so the unit toggle renders above the numeric/slider input instead of inline. Phase 4 owns the restyle. Do this via a scoped variant (prop or local style override) so other `<IntervalPicker>` consumers across Rock are not affected; Phase 4 spec records the exact mechanism after a quick component audit.
 
-### Q10. Sections & Stacks + Conditional Well — already shipped or new?
+### Q10. Sections & Stacks + Conditional Well — reuse existing core components
 
-**Background.** The redesign uses three patterns extensively: a `Section` (collapsible, headered), a `Section Stack` (horizontal description + controls layout inside a section), and a `Conditional Well` (left-bordered subdued block wrapping conditional content). These patterns appear in the design system but it is not confirmed whether shared Obsidian components exist.
+**Resolved:** All three patterns ship as shared core components today; reuse them, do not rebuild. Verified by inspecting `Rock.JavaScript.Obsidian/Framework/Controls/`:
 
-**Open question:** do shared `<Section>`, `<SectionStack>`, `<ConditionalWell>` components exist in `Rock.JavaScript.Obsidian/Framework/Controls/` (or similar)? If not, do we build them once in Phase 1 as shared primitives, or inline-build per block?
+- **`<ContentSection>`** at [contentSection.obs](Rock.JavaScript.Obsidian/Framework/Controls/contentSection.obs). Collapsible/headered section with `title`, `icon`, `description`, `headerActions` / `headerSecondaryActions` slots, and `disableCollapse` prop. Anchor-aware (works with `<ContentSectionContainer>` for sidebar nav). The redesign explicitly removes the section nav (per [research/design/03-net-new-features.md](../design/03-net-new-features.md) item R5), so use `<ContentSection>` standalone, not inside a container.
+- **`<ContentStack>`** at [contentStack.obs](Rock.JavaScript.Obsidian/Framework/Controls/contentStack.obs). Horizontal description-on-the-left, controls-on-the-right layout. Props: `title`, `description`, `help`, plus a `header` slot.
+- **`<ConditionalWell>`** at [conditionalWell.obs](Rock.JavaScript.Obsidian/Framework/Controls/conditionalWell.obs). Pure styled container (`<div class="well well-conditional">`) with a default slot. Use this for every left-bordered subdued conditional region called out in the redesign (Inactive flow, Security Level, Coordinator Notifications sub-fields, Workflow trigger qualifier sub-fields, Capacity matrix, etc.).
 
-**Default recommendation:** inspect already-converted refresh blocks (e.g., `groupTypeDetail.obs` partials) to confirm. If shared components exist, reuse. If not, build minimal versions in Phase 1 since every later phase depends on them. Do NOT inline-build per block.
+The Phase 1 spec must call out that GroupDetail uses these core components (no per-block reimplementation, no per-block CSS overrides beyond minor scoped tweaks).
 
 ### Q11. Coordinator Notifications — empty selection means None?
 
@@ -132,20 +136,22 @@ Run `node .claude/skills/convert-block/scripts/generate-guids.js` to obtain the 
 
 **Open question:** does empty selection (no boxes ticked) now mean None?
 
-**Default recommendation:** yes. The save logic treats empty selection as `ScheduleCoordinatorNotificationType.None`. Existing groups with `ScheduleCoordinatorNotificationTypes == None` render as zero boxes ticked.
+**Resolved:** Yes. Empty selection (no boxes ticked) means `ScheduleCoordinatorNotificationType.None`. The redesign drops the explicit None checkbox; the save logic treats zero-selected as None. Existing groups with `ScheduleCoordinatorNotificationTypes == None` render as zero boxes ticked.
 
 ### Q12. Latent bug triage
 
 Six pre-existing bugs surfaced during research. Each needs a Phase 0 classification: **fix-during-conversion**, **defer-to-bugfix-spec**, or **drop**.
 
-| # | Bug | Source | Recommendation |
-|---|---|---|---|
-| L1 | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../webforms/04-code-behind-walkthrough.md) | fix-during (trivial; the new code structure naturally avoids it). |
-| L2 | Possible duplicate-edit corruption in group requirements. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | defer-to-bugfix-spec for confirmation; not blocking. |
-| L3 | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | fix-during (use `EntityTypeCache.Get<DataView>().Id`). |
-| L4 | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding). | [research/webforms/13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." |
-| L5 | Missing `TagCategory` block attribute (referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared). | [research/webforms/27-misc-surfaces.md](../webforms/27-misc-surfaces.md) | drop the reference; latent dead code with no consumer. |
-| L6 | Open-redirect risk on `returnUrl` parameter (no validation). | [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) | fix-during. Validate same-origin or reject. |
+**Resolved:** All six classifications below confirmed by user. The "fix-during" rows are scoped into the phase that owns the affected feature (per the "Lands in" column).
+
+| # | Bug | Source | Resolution | Lands in |
+|---|---|---|---|---|
+| L1 | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../webforms/04-code-behind-walkthrough.md) | fix-during (trivial; the new code structure naturally avoids it). | Phase 2 (edit core / GroupType edit details). |
+| L2 | Possible duplicate-edit corruption in group requirements. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | defer-to-bugfix-spec for confirmation; not blocking. | Separate `/bugfix` spec. |
+| L3 | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | fix-during (use `EntityTypeCache.Get<DataView>().Id`). | Phase 4 (requirements modal). |
+| L4 | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding). | [research/webforms/13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." | Phase 4 (member workflow triggers). |
+| L5 | Missing `TagCategory` block attribute (referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared). | [research/webforms/27-misc-surfaces.md](../webforms/27-misc-surfaces.md) | drop the reference; latent dead code with no consumer. | Phase 1 (block-attribute declarations); simply do not port the reference. |
+| L6 | Open-redirect risk on `returnUrl` parameter (no validation). | [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) | fix-during. Validate same-origin or reject. | Phase 1 (Delete/Archive/Copy redirect handling reads `returnUrl`). |
 
 ## Locked decisions
 
@@ -180,7 +186,7 @@ public class GroupDetail : RockEntityDetailBlockType<Group, GroupBag>, IBreadCru
 | `Archive` | redirect URL string | Single-group archive. |
 | `ArchiveWithChildren` | redirect URL string | Cascade archive. |
 | `Copy` | redirect URL string | Includes `IncludeChildGroups` parameter; default UNCHECKED (changed from WebForms which had it CHECKED). |
-| `GetGroupTypeOptions` | `GroupTypeOptions` (Approach B/C only) | Conditional on Q2 resolution. |
+| `GetGroupTypeOptions` | `GroupTypeOptionsBag` | Required by Q2 Approach B; called from the Vue layer when `currentGroupTypeId` changes mid-edit. |
 
 ### Partial structure
 
@@ -215,21 +221,20 @@ Final names may shift slightly during phase specs but the structure stays.
 ```
 Rock.ViewModels/Blocks/Group/GroupDetail/
   GroupBag.cs                              # main edit/view bag
-  GroupDetailOptionsBag.cs                 # block options + (Approach A) per-GroupType options dictionary
-  GroupTypeOptionsBag.cs                   # per-GroupType reactive options
+  GroupDetailOptionsBag.cs                 # block options + initial GroupType options (for the current GroupType only, per Q2 Approach B)
+  GroupTypeOptionsBag.cs                   # per-GroupType reactive options; returned by GetGroupTypeOptions block action on cascade
   GroupLocationBag.cs                      # state collection
   GroupRequirementBag.cs
   GroupSyncBag.cs
   GroupMemberWorkflowTriggerBag.cs
   GroupMemberAttributeBag.cs
   CopyGroupRequestBag.cs
-  GroupTypeOptionsResponseBag.cs           # (Approach B/C only)
 ```
 
 ### IdKey policy
 
 - **Inbound**: page parameter `GroupId` accepts both integer and IdKey form. `GetInitialEntity<Group, GroupService>(RockContext, "GroupId")` handles both.
-- **Outbound**: every URL `GroupDetail` writes uses IdKey for the `GroupId` parameter, EXCEPT when targeting the 5 still-WebForms destinations (per Q4 default recommendation): GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage. For those, write integer Id specifically.
+- **Outbound**: every URL `GroupDetail` writes uses IdKey for the `GroupId` parameter, uniformly across all 11 outbound LinkedPage destinations. The 5 still-WebForms destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) are updated to accept IdKey in the new "Update dependencies" phase before cutover; until that phase ships, those 5 links are temporarily broken under IdKey URLs (acknowledged tradeoff).
 
 ### Phase roadmap
 
@@ -244,17 +249,16 @@ Per [ROADMAP.md](ROADMAP.md), tightened by [research/design/](../design/):
 | 4 | Requirements + Sync + Member Workflows | Three sub-feature panels with modals. |
 | 5 | Locations & Schedules (incl. Map Cards in view) | Most complex sub-feature; meeting details fully editable. |
 | 6 | Net-new features beyond the parity-plus-design baseline | Likely empty unless Trailblazer Settings becomes substantial. |
-| 7 | Cutover and cleanup | Verify chop, delete WebForms files, smoke test cross-block callers, release notes. |
+| 7 | Update dependencies | Update the 5 still-WebForms destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) so each accepts IdKey on its `GroupId` page parameter. Required because Phase 1+ writes IdKey to all 11 outbound URLs (per Q4) and these 5 destinations will be broken until updated. |
+| 8 | Cutover and cleanup | Verify chop, delete WebForms files, smoke test cross-block callers, release notes. |
 
 Per [research/design/03-net-new-features.md](../design/03-net-new-features.md), the design pass folded the prior Phase 6 (View panel redesign) into Phase 1 because the Figma is locked.
 
 ## Cross-block follow-on tracking
 
-These do NOT ship in this conversion but must be tracked separately so they're not forgotten:
+### Outbound destinations needing IdKey acceptance (scoped into Phase 7)
 
-### Outbound destinations needing IdKey acceptance
-
-5 still-WebForms blocks. GroupDetail writes integer Id when targeting them. Eventually each should be updated to accept IdKey.
+The 5 still-WebForms outbound destinations are now in scope for the new Phase 7 ("Update dependencies"). Each will be updated to accept IdKey on its `GroupId` page parameter. Until Phase 7 ships, GroupDetail's IdKey URLs to these destinations are broken (acknowledged tradeoff per Q4).
 
 | Block setting | Destination block | Path |
 |---|---|---|
@@ -264,19 +268,19 @@ These do NOT ship in this conversion but must be tracked separately so they're n
 | GroupMapPage | Group map block | location TBD |
 | GroupSchedulerPage | Group scheduler block | location TBD |
 
-### Inbound callers writing integer Id
+### Inbound callers writing integer Id (out of scope)
 
-11 callers continue to write integer GroupId. GroupDetail accepts both forms so this is non-blocking. Eventually each should be updated to write IdKey.
+11 callers continue to write integer GroupId. GroupDetail accepts both forms so this is non-blocking. Eventually each should be updated to write IdKey, but that work is NOT in scope for this conversion or for Phase 7 (which is focused on the broken outbound side).
 
 See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) for the full list.
 
 ## Out of scope
 
-- Convert any of the 5 still-WebForms outbound destinations.
+- Convert any of the 5 still-WebForms outbound destinations to Obsidian. Phase 7 only adds IdKey acceptance to those WebForms blocks; full Obsidian conversion is separate work.
 - Convert any of the 11 still-integer-Id inbound callers.
 - Add new functional features beyond what the Figma defines.
 - Restyle non-block-specific components (TagList, FollowingsHelper, etc.) unless required by a phase.
-- Migrate `Group.PhotoId` users on the Person profile or other surfaces.
+- Migrate any cross-entity references that would touch the new `Group.PhotoId` column added in Phase 2 (e.g., Person profile photo surfaces). The new column is GroupDetail-scoped only.
 - Touch the `core_templates_GroupViewTemplate` SystemSetting (it stays in place; just unused by GroupDetail).
 
 ## Verification (cross-phase)
@@ -315,6 +319,13 @@ After Phase 0, every later phase reads this locked document at session start, fo
 
 ## Status
 
-**Draft** — awaiting Phase 0 session for user input on Q1-Q12.
+**Locked** on 2026-05-06. All twelve open questions (Q1-Q12) resolved by user during the Phase 0 session. Cross-phase contract is now canonical for all later implementation phases.
 
-When all open questions are resolved, change to "Locked".
+Notable resolutions worth flagging here:
+- Q1: dropped `[ContextAware(typeof(Group))]` and `ContextEntityBlock` base.
+- Q2: GroupType cascade uses Approach B (server round-trip); the `GetGroupTypeOptions` block action is required by Phase 2.
+- Q4: GroupDetail writes IdKey uniformly to all 11 outbound destinations; the 5 still-WebForms destinations are scoped into the new **Phase 7 ("Update dependencies")** to accept IdKey before cutover. The phase roadmap was renumbered to 9 phases (0-8) as a result.
+- Q8: `Group.PhotoId` does not exist today; a new column is added in Phase 2 (mirroring `Person.PhotoId`).
+- Q9: Sync Frequency reuses the existing Obsidian `<IntervalPicker>` with a Phase 4 styling pass.
+- Q10: `<ContentSection>`, `<ContentStack>`, `<ConditionalWell>` already ship as core components; reuse, do not rebuild.
+- Q12: latent bugs assigned per-phase landing slots; L2 is the only bug deferred to a separate `/bugfix` spec.
