@@ -18,10 +18,10 @@ The conversion is broken into phases for iterative development with review check
 
 This effort is informed by two completed research passes:
 
-- **WebForms parity baseline** — [research/webforms/](../../../research/webforms/) (26 files, 7,572 lines). Comprehensive coverage of the existing block: configuration, state matrix, code-behind walkthrough, every sub-feature, validation cascades, GroupType inheritance, cross-block dependencies, WebForms-isms.
-- **Design intent** — [research/design/](../../../research/design/) (7 docs + 25 screenshots). Pure-Vue redesign of both panels: Sections & Stacks pattern, Group Tools card, Map Cards, Linkages section, ~30 label renames.
+- **WebForms parity baseline** — [research/webforms/](../webforms/) (26 files, 7,572 lines). Comprehensive coverage of the existing block: configuration, state matrix, code-behind walkthrough, every sub-feature, validation cascades, GroupType inheritance, cross-block dependencies, WebForms-isms.
+- **Design intent** — [research/design/](../design/) (7 docs + 25 screenshots). Pure-Vue redesign of both panels: Sections & Stacks pattern, Group Tools card, Map Cards, Linkages section, ~30 label renames.
 
-The phase partition recommendation lives at [research/webforms/21-phase-partitioning.md](../../../research/webforms/21-phase-partitioning.md). The partition was validated by both research passes and does not need restructuring; the design pass tightened scope per phase but did not move boundaries.
+The phase partition recommendation lives at [research/webforms/21-phase-partitioning.md](../webforms/21-phase-partitioning.md). The partition was validated by both research passes and does not need restructuring; the design pass tightened scope per phase but did not move boundaries.
 
 ## Spec status
 

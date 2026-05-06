@@ -18,7 +18,7 @@ contributors: []
 
 The block is exceptionally large (5,950 lines across markup + code-behind, 11 panel widgets, 4 modals, ~12 sub-features), and the redesign is non-trivial (Pure-Vue View panel, Sections & Stacks pattern, ~30 control rename, new Group Image, Linkages section, Map Cards, Audit modal). Both factors argue against single-shot conversion. The phased plan delivers reviewable slices.
 
-Foundational research lives at [research/webforms/](../../../research/webforms/) and [research/design/](../../../research/design/). All claims here trace back to those files.
+Foundational research lives at [research/webforms/](../webforms/) and [research/design/](../design/). All claims here trace back to those files.
 
 ## Requirements
 
@@ -40,7 +40,7 @@ These items must be resolved during the Phase 0 session by direct user input. Ea
 
 ### Q1. ContextEntityBlock — keep or drop?
 
-**Background.** The WebForms block declares `[ContextAware(typeof(Group))]` and inherits `ContextEntityBlock`. The deep-research pass confirmed that the block never reads `this.Entity` or calls `ContextEntity<Group>()`. Every code path goes through the URL parameter. Grep across the entire codebase did not surface a single caller relying on the context-aware pathway. See [research/webforms/18-cross-block-dependencies.md](../../../research/webforms/18-cross-block-dependencies.md).
+**Background.** The WebForms block declares `[ContextAware(typeof(Group))]` and inherits `ContextEntityBlock`. The deep-research pass confirmed that the block never reads `this.Entity` or calls `ContextEntity<Group>()`. Every code path goes through the URL parameter. Grep across the entire codebase did not surface a single caller relying on the context-aware pathway. See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md).
 
 User's earlier decision: "Keep it, assume production pages rely on it."
 Research finding: dead code with no observable consumers.
@@ -51,7 +51,7 @@ Research finding: dead code with no observable consumers.
 
 ### Q2. GroupType-change reactive cascade — Approach A, B, or C?
 
-**Background.** When `currentGroupTypeId` changes mid-edit, the form reshapes itself dramatically (panels show/hide, options repopulate, inherited attributes refresh). The cascade map is in [research/webforms/22-grouptype-cascade.md](../../../research/webforms/22-grouptype-cascade.md).
+**Background.** When `currentGroupTypeId` changes mid-edit, the form reshapes itself dramatically (panels show/hide, options repopulate, inherited attributes refresh). The cascade map is in [research/webforms/22-grouptype-cascade.md](../webforms/22-grouptype-cascade.md).
 
 | Approach | Tradeoff |
 |---|---|
@@ -63,11 +63,11 @@ Research finding: dead code with no observable consumers.
 
 ### Q3. View panel — confirmed Pure Vue (no Lava)
 
-**Resolved by user.** Pure Vue, no `GroupViewLavaTemplate`, no fallback. Customer customizations of the system setting `core_templates_GroupViewTemplate` will be lost on conversion; release notes must call this out. See [research/webforms/17-view-panel.md](../../../research/webforms/17-view-panel.md).
+**Resolved by user.** Pure Vue, no `GroupViewLavaTemplate`, no fallback. Customer customizations of the system setting `core_templates_GroupViewTemplate` will be lost on conversion; release notes must call this out. See [research/webforms/17-view-panel.md](../webforms/17-view-panel.md).
 
 ### Q4. IdKey adoption — confirmed accept and write
 
-**Resolved by user.** GroupDetail accepts both integer Id and IdKey on inbound page parameters. GroupDetail writes IdKey on all outbound LinkedPage URLs. Five outbound destinations are still WebForms and integer-only (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage); they break if GroupDetail writes IdKey to them. See [research/webforms/18-cross-block-dependencies.md](../../../research/webforms/18-cross-block-dependencies.md).
+**Resolved by user.** GroupDetail accepts both integer Id and IdKey on inbound page parameters. GroupDetail writes IdKey on all outbound LinkedPage URLs. Five outbound destinations are still WebForms and integer-only (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage); they break if GroupDetail writes IdKey to them. See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md).
 
 **Open question:** for the 5 still-WebForms destinations, does the conversion (a) write integer specifically when targeting them, (b) update them to accept IdKey as part of this scope, or (c) defer those updates as separate follow-on work?
 
@@ -108,7 +108,7 @@ Run `node .claude/skills/convert-block/scripts/generate-guids.js` to obtain the 
 
 **Open question:** is `Group.PhotoId` the right field, or does this require a new column?
 
-**Default recommendation:** reuse `Group.PhotoId`. Apply the same `IsTemporary` toggle pattern used for the chat-channel-avatar binary file. See [research/webforms/14-chat.md](../../../research/webforms/14-chat.md) and [research/webforms/23-validations-and-cascades.md](../../../research/webforms/23-validations-and-cascades.md).
+**Default recommendation:** reuse `Group.PhotoId`. Apply the same `IsTemporary` toggle pattern used for the chat-channel-avatar binary file. See [research/webforms/14-chat.md](../webforms/14-chat.md) and [research/webforms/23-validations-and-cascades.md](../webforms/23-validations-and-cascades.md).
 
 ### Q9. Sync Frequency control
 
@@ -140,12 +140,12 @@ Six pre-existing bugs surfaced during research. Each needs a Phase 0 classificat
 
 | # | Bug | Source | Recommendation |
 |---|---|---|---|
-| L1 | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../../../research/webforms/04-code-behind-walkthrough.md) | fix-during (trivial; the new code structure naturally avoids it). |
-| L2 | Possible duplicate-edit corruption in group requirements. | [research/webforms/11-group-requirements.md](../../../research/webforms/11-group-requirements.md) | defer-to-bugfix-spec for confirmation; not blocking. |
-| L3 | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup. | [research/webforms/11-group-requirements.md](../../../research/webforms/11-group-requirements.md) | fix-during (use `EntityTypeCache.Get<DataView>().Id`). |
-| L4 | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding). | [research/webforms/13-member-workflow-triggers.md](../../../research/webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." |
-| L5 | Missing `TagCategory` block attribute (referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared). | [research/webforms/27-misc-surfaces.md](../../../research/webforms/27-misc-surfaces.md) | drop the reference; latent dead code with no consumer. |
-| L6 | Open-redirect risk on `returnUrl` parameter (no validation). | [research/webforms/18-cross-block-dependencies.md](../../../research/webforms/18-cross-block-dependencies.md) | fix-during. Validate same-origin or reject. |
+| L1 | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../webforms/04-code-behind-walkthrough.md) | fix-during (trivial; the new code structure naturally avoids it). |
+| L2 | Possible duplicate-edit corruption in group requirements. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | defer-to-bugfix-spec for confirmation; not blocking. |
+| L3 | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | fix-during (use `EntityTypeCache.Get<DataView>().Id`). |
+| L4 | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding). | [research/webforms/13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." |
+| L5 | Missing `TagCategory` block attribute (referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared). | [research/webforms/27-misc-surfaces.md](../webforms/27-misc-surfaces.md) | drop the reference; latent dead code with no consumer. |
+| L6 | Open-redirect risk on `returnUrl` parameter (no validation). | [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) | fix-during. Validate same-origin or reject. |
 
 ## Locked decisions
 
@@ -176,7 +176,7 @@ public class GroupDetail : RockEntityDetailBlockType<Group, GroupBag>, IBreadCru
 |---|---|---|
 | `Edit` | `ValidPropertiesBox<GroupBag>` | Returns full edit-mode bag for an existing group, or a new bag for `groupId == 0`. |
 | `Save` | `ValidPropertiesBox<GroupBag>` (200) OR redirect URL string (201) | 200 on update (stay on page in view mode), 201 on create with redirect to the new group's URL. |
-| `Delete` | redirect URL string | Auth-checked, runs the WebForms delete logic verbatim (see [research/webforms/16-archive-delete-copy.md](../../../research/webforms/16-archive-delete-copy.md)). |
+| `Delete` | redirect URL string | Auth-checked, runs the WebForms delete logic verbatim (see [research/webforms/16-archive-delete-copy.md](../webforms/16-archive-delete-copy.md)). |
 | `Archive` | redirect URL string | Single-group archive. |
 | `ArchiveWithChildren` | redirect URL string | Cascade archive. |
 | `Copy` | redirect URL string | Includes `IncludeChildGroups` parameter; default UNCHECKED (changed from WebForms which had it CHECKED). |
@@ -233,7 +233,7 @@ Rock.ViewModels/Blocks/Group/GroupDetail/
 
 ### Phase roadmap
 
-Per [research/webforms/21-phase-partitioning.md](../../../research/webforms/21-phase-partitioning.md), tightened by [research/design/](../../../research/design/):
+Per [research/webforms/21-phase-partitioning.md](../webforms/21-phase-partitioning.md), tightened by [research/design/](../design/):
 
 | Phase | Title | Output |
 |---|---|---|
@@ -246,7 +246,7 @@ Per [research/webforms/21-phase-partitioning.md](../../../research/webforms/21-p
 | 6 | Net-new features beyond the parity-plus-design baseline | Likely empty unless Trailblazer Settings becomes substantial. |
 | 7 | Cutover and cleanup | Verify chop, delete WebForms files, smoke test cross-block callers, release notes. |
 
-Per [research/design/03-net-new-features.md](../../../research/design/03-net-new-features.md), the design pass folded the prior Phase 6 (View panel redesign) into Phase 1 because the Figma is locked.
+Per [research/design/03-net-new-features.md](../design/03-net-new-features.md), the design pass folded the prior Phase 6 (View panel redesign) into Phase 1 because the Figma is locked.
 
 ## Cross-block follow-on tracking
 
@@ -268,7 +268,7 @@ These do NOT ship in this conversion but must be tracked separately so they're n
 
 11 callers continue to write integer GroupId. GroupDetail accepts both forms so this is non-blocking. Eventually each should be updated to write IdKey.
 
-See [research/webforms/18-cross-block-dependencies.md](../../../research/webforms/18-cross-block-dependencies.md) for the full list.
+See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) for the full list.
 
 ## Out of scope
 
@@ -285,11 +285,11 @@ The full conversion is verified when:
 
 - `Rock.sln` builds clean.
 - Every block-attribute combination from research is exercised manually (or via tests if present).
-- Every state from [research/webforms/02-block-states.md](../../../research/webforms/02-block-states.md) renders correctly.
-- Every save scenario from [research/webforms/23-validations-and-cascades.md](../../../research/webforms/23-validations-and-cascades.md) preserves the same database side effects.
+- Every state from [research/webforms/02-block-states.md](../webforms/02-block-states.md) renders correctly.
+- Every save scenario from [research/webforms/23-validations-and-cascades.md](../webforms/23-validations-and-cascades.md) preserves the same database side effects.
 - All 11 outbound LinkedPage links navigate correctly.
 - The Rock startup chop runs successfully on a fresh database (BlockType row's EntityType swapped, Path cleared, all page Block instances retain their attribute values).
-- Smoke test from each of the 14+ inbound callers documented in [research/webforms/18-cross-block-dependencies.md](../../../research/webforms/18-cross-block-dependencies.md).
+- Smoke test from each of the 14+ inbound callers documented in [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md).
 - WebForms files (`GroupDetail.ascx`, `.ascx.cs`, `.ascx.designer.cs`) deleted from source control.
 
 Per-phase verification lives in each phase spec.
