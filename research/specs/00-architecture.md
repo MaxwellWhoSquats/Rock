@@ -309,9 +309,9 @@ Steps:
 7. Mark this document's status as `Locked` at the bottom.
 8. Author `01-phase-1-shell-and-view.md` using PHASE-SPEC-TEMPLATE.md as the starting structure. Pay special attention to the "Research coverage" and "Implementation checklist" sections — these drive the self-review at session close, so they must be specific.
 9. Update [INDEX.md](INDEX.md): mark architecture as `locked`, mark Phase 1 spec as `draft` awaiting user review.
-10. Commit per `/commit`. Recommended message: `- (Group) Phase 0: Architecture spec locked + Phase 1 implementation spec drafted.`
+10. Output a suggested commit message and tell the user the changes are uncommitted. Do NOT run `git commit` or `/commit`. Suggested message: `- (Group) Phase 0: Architecture spec locked + Phase 1 implementation spec drafted.`
 
-After Phase 0, every later phase reads this locked document at session start, follows SESSION-PROTOCOL.md, and produces a coverage report at session close.
+After Phase 0, every later phase reads this locked document at session start, follows SESSION-PROTOCOL.md, and produces a coverage report at session close. The user owns git history at phase boundaries.
 
 ## Status
 
