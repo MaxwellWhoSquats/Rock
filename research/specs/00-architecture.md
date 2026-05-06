@@ -233,7 +233,7 @@ Rock.ViewModels/Blocks/Group/GroupDetail/
 
 ### Phase roadmap
 
-Per [research/webforms/21-phase-partitioning.md](../webforms/21-phase-partitioning.md), tightened by [research/design/](../design/):
+Per [ROADMAP.md](ROADMAP.md), tightened by [research/design/](../design/):
 
 | Phase | Title | Output |
 |---|---|---|

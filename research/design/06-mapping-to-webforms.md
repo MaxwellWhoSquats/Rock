@@ -154,7 +154,7 @@ Cosmetic-only label changes (underlying data unchanged). Listed by WebForms labe
 
 ## Phase-partition impact
 
-The 8-phase plan in [../webforms/21-phase-partitioning.md](../webforms/21-phase-partitioning.md) does NOT need restructuring. Each design item maps cleanly to the existing phases.
+The 8-phase plan in [../specs/ROADMAP.md](../specs/ROADMAP.md) does NOT need restructuring. Each design item maps cleanly to the existing phases.
 
 Recommended phase-by-phase deltas (in addition to the existing plan):
 

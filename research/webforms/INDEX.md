@@ -35,7 +35,7 @@ This research feeds into:
 | 18 | [Cross-block dependencies + IdKey follow-on](18-cross-block-dependencies.md) | 382 | deepened |
 | 19 | [WebForms-isms / portability gaps](19-webforms-isms.md) | 267 | deepened |
 | 20 | [Reference: similar converted blocks](20-reference-blocks.md) | 332 | done |
-| 21 | [Phase-partitioning recommendation](21-phase-partitioning.md) | 311 | done |
+| 21 | Phase-partitioning recommendation | — | moved to [research/specs/ROADMAP.md](../specs/ROADMAP.md) |
 | 22 | [Open question: GroupType cascade](22-grouptype-cascade.md) | 315 | open |
 | 23 | [Server-side validations and side-effects cascade](23-validations-and-cascades.md) | 354 | new |
 | 24 | [GroupType inheritance behavior](24-grouptype-inheritance.md) | 282 | new |

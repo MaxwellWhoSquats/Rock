@@ -12,7 +12,7 @@ Working directory for the multi-phase Obsidian conversion of `RockWeb/Blocks/Gro
 
 1. WebForms research pass (complete) — captures the parity baseline.
 2. Design research pass (complete) — captures the new design and its delta from parity.
-3. Phase partitioning informed by both research halves; recommendation lives in [webforms/21-phase-partitioning.md](webforms/21-phase-partitioning.md).
+3. Phase partitioning informed by both research halves; recommendation lives in [specs/ROADMAP.md](specs/ROADMAP.md).
 4. Per-phase specs authored in [specs/](specs/), one phase per Claude session.
 
 ## Conventions

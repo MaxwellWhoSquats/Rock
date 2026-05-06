@@ -31,19 +31,19 @@ The 11 panel widgets are not all equal. A panel-by-panel split would have phases
 
 **Decisions resolved by the user**:
 
-1. **View panel redesign approach** — **Pure Vue, no Lava.** The new design lives in the user-supplied Figma file. `groupType.GroupViewLavaTemplate` is not used. See [17-view-panel.md](17-view-panel.md) for the migration story.
+1. **View panel redesign approach** — **Pure Vue, no Lava.** The new design lives in the user-supplied Figma file. `groupType.GroupViewLavaTemplate` is not used. See [17-view-panel.md](../webforms/17-view-panel.md) for the migration story.
 
 2. **New features beyond 1:1 parity** — Enumerated by the Figma design. The Figma is the source of truth for what is parity vs. net-new. The phase plan must absorb whatever new features the design adds; they will land in whichever phase touches the same domain.
 
 3. **`[ContextAware(typeof(Group))]` support** — **User decided: keep it.** Production pages are assumed to rely on it.
 
-   **However**, the deep-research pass (see [18-cross-block-dependencies.md](18-cross-block-dependencies.md)) confirmed that the WebForms block **never reads `this.Entity` or calls `ContextEntity<Group>()`**. The `ContextEntityBlock` inheritance is dead code — every code path goes through the URL parameter. Grep across the entire codebase did not surface a single caller relying on the context-aware pathway.
+   **However**, the deep-research pass (see [18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md)) confirmed that the WebForms block **never reads `this.Entity` or calls `ContextEntity<Group>()`**. The `ContextEntityBlock` inheritance is dead code — every code path goes through the URL parameter. Grep across the entire codebase did not surface a single caller relying on the context-aware pathway.
 
    This is flagged for a possible decision-revisit. If the user confirms after re-reading the analysis that ContextAware really should be kept, the conversion ports it via `RequestContext.GetContextEntity<Group>()` falling back to URL parameter. If the user is willing to drop it based on the dead-code finding, the conversion drops the attribute and base-class change, which simplifies the Phase 1 shell.
 
 4. **IdKey support** — `GroupDetail` both **accepts** and **writes** IdKey. The page parameter `GroupId` accepts integer-or-IdKey form on the way in. Outbound LinkedPage URLs are written with IdKey.
 
-   **Verified state of downstream IdKey support** (per the deep-research pass in [18-cross-block-dependencies.md](18-cross-block-dependencies.md)):
+   **Verified state of downstream IdKey support** (per the deep-research pass in [18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md)):
 
    - **Outbound destinations** (11 total): 3 Obsidian-converted and accept IdKey (GroupAttendanceList, GroupRSVPPage, GroupPlacementPage). 5 still WebForms and integer-only — will break if GroupDetail starts writing IdKey to them: GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage. 3 are pass-through (RegistrationInstancePage, EventItemOccurrencePage, ContentItemPage).
 
@@ -61,7 +61,7 @@ The 11 panel widgets are not all equal. A panel-by-panel split would have phases
    node .claude/skills/convert-block/scripts/generate-guids.js
    ```
    
-   Do NOT call `AddOrUpdateEntityBlockType` here — that is for net-new blocks and would create a parallel BlockType row, leaving every existing page still pointing at the WebForms one. See [01-block-configuration.md](01-block-configuration.md) for the full pattern.
+   Do NOT call `AddOrUpdateEntityBlockType` here — that is for net-new blocks and would create a parallel BlockType row, leaving every existing page still pointing at the WebForms one. See [01-block-configuration.md](../webforms/01-block-configuration.md) for the full pattern.
 
 6. **Partial structure** — Mirror GroupTypeDetail's pattern: one `editPanel.partial.obs`, one `viewPanel.partial.obs`, one partial per sub-feature panel. Confirm specific naming during Phase 0.
 
@@ -69,9 +69,9 @@ The 11 panel widgets are not all equal. A panel-by-panel split would have phases
 
 **Decision still open**:
 
-8. **GroupType-change reactive cascade** — How will the Vue layer reshape itself when `currentGroupTypeId` changes mid-edit? Two main approaches with significantly different tradeoffs. See [22-grouptype-cascade.md](22-grouptype-cascade.md) for the full explainer the user requested.
+8. **GroupType-change reactive cascade** — How will the Vue layer reshape itself when `currentGroupTypeId` changes mid-edit? Two main approaches with significantly different tradeoffs. See [22-grouptype-cascade.md](../webforms/22-grouptype-cascade.md) for the full explainer the user requested.
 
-   **Updated payload data** from the deep-research pass ([24-grouptype-inheritance.md](24-grouptype-inheritance.md)): per-GroupType options are roughly 3.75 KB serialized, so a 50-GroupType site loads ~187 KB extra in the initial bag for Approach A. This sharpens the tradeoff — the original "100 KB extra" estimate was conservative. For installations with 100+ user-pickable GroupTypes the payload is meaningful (375 KB+).
+   **Updated payload data** from the deep-research pass ([24-grouptype-inheritance.md](../webforms/24-grouptype-inheritance.md)): per-GroupType options are roughly 3.75 KB serialized, so a 50-GroupType site loads ~187 KB extra in the initial bag for Approach A. This sharpens the tradeoff — the original "100 KB extra" estimate was conservative. For installations with 100+ user-pickable GroupTypes the payload is meaningful (375 KB+).
 
    **GroupTypeDetail precedent**: that block already uses a hybrid lazy-load pattern (cycle-guarded block action) for its inheritance chain. The pattern is portable and well-tested.
 
@@ -82,11 +82,11 @@ The 11 panel widgets are not all equal. A panel-by-panel split would have phases
 The agents identified several pre-existing bugs in `GroupDetail.ascx[.cs]` that are independent of the conversion. They should be triaged during Phase 0:
 
 - **Duplicate code block** at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` — same logic appears twice. Trivial cleanup during conversion.
-- **Possible duplicate-edit corruption in group requirements** — flagged in [11-group-requirements.md](11-group-requirements.md). Worth a closer look during Phase 4.
+- **Possible duplicate-edit corruption in group requirements** — flagged in [11-group-requirements.md](../webforms/11-group-requirements.md). Worth a closer look during Phase 4.
 - **Hard-coded `EntityTypeId=15`** in the `mdGroupRequirement` markup. Should use `EntityTypeCache.GetId<DataView>()`. Trivial fix during conversion.
-- **XSS hole in `FormatTriggerType`** — flagged in [13-member-workflow-triggers.md](13-member-workflow-triggers.md). User-controlled data interpolated into HTML without encoding. Per memory, "HTML-encode user-controlled values during conversion review" — fix during conversion.
+- **XSS hole in `FormatTriggerType`** — flagged in [13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md). User-controlled data interpolated into HTML without encoding. Per memory, "HTML-encode user-controlled values during conversion review" — fix during conversion.
 - **Missing `TagCategory` block attribute** — referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared. Latent or vestigial. Either declare and ship, or drop the reference.
-- **Open-redirect risk on `returnUrl`** — flagged in [18-cross-block-dependencies.md](18-cross-block-dependencies.md). The block redirects to whatever URL the user supplies in the query string. Phase 0 should decide whether to validate (e.g., same-origin only).
+- **Open-redirect risk on `returnUrl`** — flagged in [18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md). The block redirects to whatever URL the user supplies in the query string. Phase 0 should decide whether to validate (e.g., same-origin only).
 
 These six are **not blocking** but should each be classified during Phase 0 as: fix-during-conversion, defer-to-bugfix-spec, or drop.
 
@@ -262,7 +262,7 @@ These six are **not blocking** but should each be classified during Phase 0 as: 
 
 - Verification that the Rock startup chop ran cleanly (BlockType row's EntityType swapped, Path cleared, all page block instances retained their attribute values).
 - Deletion of `RockWeb/Blocks/Groups/GroupDetail.ascx`, `GroupDetail.ascx.cs`, and `GroupDetail.ascx.designer.cs`.
-- Smoke tests across every cross-block caller (per [18-cross-block-dependencies.md](18-cross-block-dependencies.md)).
+- Smoke tests across every cross-block caller (per [18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md)).
 - Final QA pass on every block-attribute combination and every GroupType-driven panel-visibility branch.
 
 No migration file is written for the cutover. The chop is automatic at startup and the WebForms files are deleted from source control as part of this phase.
@@ -312,9 +312,9 @@ Phases 3, 4, and 5 could partially parallelize across multiple developers/sessio
 1. **View panel design pace** — Pure Vue per Phase 0 resolution, but the design fidelity depends on the Figma being finalized. If the Figma lands later than Phase 1 starts, Phase 1 ships a structured-but-unstyled placeholder and Phase 6 replaces the markup. If the Figma is ready earlier, Phase 1 can ship the full design and Phase 6 collapses into Phase 1.
 2. **New features driven by the Figma** — Each feature must be classified during Phase 0 (parity vs. net-new) and slotted into the most-related phase. Cross-cutting features (those that don't fit any single phase cleanly) become their own micro-phase or go into Phase 7.
 3. **Inline schedule + location schedules interplay** — The most subtle correctness risk in Phase 5. The save flow's `GroupMemberAssignment` cleanup logic and the `Schedule.Name = empty` convention must be preserved exactly.
-4. **GroupType-change cascade** — Still open. See [22-grouptype-cascade.md](22-grouptype-cascade.md). Must be resolved before Phase 2 begins because it shapes both the OptionsBag and the C# block actions.
-5. **Customer-customized GroupViewLavaTemplate** — Per Phase 0 resolution, the new GroupDetail does not honor the template. Sites that customized it need release-note callouts and possibly a one-time data audit. See [17-view-panel.md](17-view-panel.md).
-6. **Linked page IdKey acceptance** — Downstream blocks (AttendancePage, GroupListPage, etc.) need to accept IdKey form for the GroupId param GroupDetail will write. List documented in [18-cross-block-dependencies.md](18-cross-block-dependencies.md). Not in scope for this effort but should be tracked as follow-on work.
+4. **GroupType-change cascade** — Still open. See [22-grouptype-cascade.md](../webforms/22-grouptype-cascade.md). Must be resolved before Phase 2 begins because it shapes both the OptionsBag and the C# block actions.
+5. **Customer-customized GroupViewLavaTemplate** — Per Phase 0 resolution, the new GroupDetail does not honor the template. Sites that customized it need release-note callouts and possibly a one-time data audit. See [17-view-panel.md](../webforms/17-view-panel.md).
+6. **Linked page IdKey acceptance** — Downstream blocks (AttendancePage, GroupListPage, etc.) need to accept IdKey form for the GroupId param GroupDetail will write. List documented in [18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md). Not in scope for this effort but should be tracked as follow-on work.
 
 ## Alternatives considered
 

@@ -1,6 +1,6 @@
 # Net-New Features (Beyond WebForms Parity)
 
-This file enumerates everything the new design adds that does NOT exist in the WebForms `GroupDetail.ascx` block. Each item includes a brief description, where it lives in the UI, suspected data/service requirements, and an initial phase-partition recommendation per [../webforms/21-phase-partitioning.md](../webforms/21-phase-partitioning.md).
+This file enumerates everything the new design adds that does NOT exist in the WebForms `GroupDetail.ascx` block. Each item includes a brief description, where it lives in the UI, suspected data/service requirements, and an initial phase-partition recommendation per [../specs/ROADMAP.md](../specs/ROADMAP.md).
 
 | # | Feature | UI location | Data / service requirements | Phase recommendation |
 |---|---|---|---|---|
@@ -54,7 +54,7 @@ This file enumerates everything the new design adds that does NOT exist in the W
 
 ## Phase-partition impact
 
-These additions and changes do NOT require restructuring the 8-phase partition in [../webforms/21-phase-partitioning.md](../webforms/21-phase-partitioning.md). Each item slots into an existing phase. Most net-new items land in Phase 1 (shell + view) or Phase 2 (core edit fields).
+These additions and changes do NOT require restructuring the 8-phase partition in [../specs/ROADMAP.md](../specs/ROADMAP.md). Each item slots into an existing phase. Most net-new items land in Phase 1 (shell + view) or Phase 2 (core edit fields).
 
 The most consequential additions for spec scope:
 - **#5 Map cards** — adds visual + interaction complexity to Phase 5.

@@ -19,7 +19,7 @@ Both panels follow a common chrome: panel header (icon + name + group-type label
 
 ## Source-of-truth status
 
-Per Phase 0 resolutions in [../webforms/21-phase-partitioning.md](../webforms/21-phase-partitioning.md), the Figma is the **source of truth** for:
+Per Phase 0 resolutions in [../specs/ROADMAP.md](../specs/ROADMAP.md), the Figma is the **source of truth** for:
 
 - Visual layout of both panels.
 - Every label and helper-text string (designer-supplied).
