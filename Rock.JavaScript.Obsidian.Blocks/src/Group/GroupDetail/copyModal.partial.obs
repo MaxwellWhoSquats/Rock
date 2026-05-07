@@ -1,0 +1,63 @@
+<!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
+<template>
+    <Modal v-model="isVisible"
+           title="Copy Group"
+           saveText="Copy"
+           @save="onSave">
+        <NotificationBox alertType="warning">
+            <p>This action will copy the selected group and (optionally) it's child groups. Group members will not be copied.</p>
+            <p>The following items will be included for every copied group:</p>
+            <ul>
+                <li>Group member attributes configuration</li>
+                <li>Group attributes configuration and their values</li>
+                <li>Schedules</li>
+                <li>Authorization (both authorizations to the group and access to other entities based on membership to the group)</li>
+                <li>Locations (except when the location is a group member address)</li>
+                <li>Group requirements</li>
+                <li>Group syncs</li>
+            </ul>
+        </NotificationBox>
+
+        <CheckBox v-model="includeChildGroups" label="Include Child Groups" />
+    </Modal>
+</template>
+
+<script setup lang="ts">
+    import { ref, watch } from "vue";
+    import Modal from "@Obsidian/Controls/modal.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import CheckBox from "@Obsidian/Controls/checkBox.obs";
+    import { CopyGroupRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/copyGroupRequestBag";
+
+    const props = defineProps<{
+        modelValue: boolean;
+    }>();
+
+    const emit = defineEmits<{
+        (e: "update:modelValue", value: boolean): void;
+        (e: "save", bag: CopyGroupRequestBag): void;
+    }>();
+
+    const isVisible = ref(props.modelValue);
+    // Default unchecked per design C1 (flipped from WebForms which
+    // defaulted to checked).
+    const includeChildGroups = ref(false);
+
+    watch(() => props.modelValue, value => {
+        isVisible.value = value;
+        if (value) {
+            includeChildGroups.value = false;
+        }
+    });
+
+    watch(isVisible, value => {
+        emit("update:modelValue", value);
+    });
+
+    function onSave(): void {
+        emit("save", {
+            key: "",
+            includeChildGroups: includeChildGroups.value
+        });
+    }
+</script>

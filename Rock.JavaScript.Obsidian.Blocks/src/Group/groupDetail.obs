@@ -1,0 +1,366 @@
+<!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
+<template>
+    <NotificationBox v-if="blockError" alertType="warning" v-html="blockError"></NotificationBox>
+
+    <NotificationBox v-if="errorMessage" alertType="danger" v-html="errorMessage"></NotificationBox>
+
+    <DetailBlock v-if="!blockError"
+                 v-model:mode="panelMode"
+                 :name="panelName"
+                 :labels="blockLabels"
+                 :entityKey="entityKey"
+                 :entityTypeGuid="entityTypeGuid"
+                 :entityTypeName="entityTypeName"
+                 :isAuditHidden="false"
+                 :isBadgesVisible="true"
+                 :isDeleteVisible="isDeleteVisible"
+                 :isEditVisible="canEdit"
+                 :isFollowVisible="true"
+                 :isSecurityHidden="false"
+                 :isTagsVisible="isTagListShown"
+                 :footerActions="footerActions"
+                 :footerSecondaryActions="footerSecondaryActions"
+                 @cancelEdit="onCancelEdit"
+                 @delete="onDelete"
+                 @edit="onEdit">
+        <template #view>
+            <ViewPanel :modelValue="groupViewBag"
+                       :options="options"
+                       :navigationUrls="config.navigationUrls" />
+        </template>
+
+        <template #edit>
+            <EditPanel @cancel="onCancelEdit" />
+        </template>
+    </DetailBlock>
+
+    <CopyModal v-model="isCopyModalVisible"
+               @save="onCopySave" />
+
+    <Modal v-model="isArchiveChildPromptVisible"
+           title="Archive Child Groups?"
+           saveText="Yes"
+           cancelText="No"
+           @save="onArchiveCascade"
+           @closeModal="onArchiveSingle">
+        <p>Would you like to archive this group's children?</p>
+    </Modal>
+</template>
+
+<script setup lang="ts">
+    import { computed, ref } from "vue";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import Modal from "@Obsidian/Controls/modal.obs";
+    import { confirm, confirmDelete } from "@Obsidian/Utility/dialogs";
+    import { addQuickReturn } from "@Obsidian/Utility/page";
+    import DetailBlock from "@Obsidian/Templates/detailBlock";
+    import { DetailPanelMode } from "@Obsidian/Enums/Controls/detailPanelMode";
+    import { PanelAction } from "@Obsidian/Types/Controls/panelAction";
+    import { onConfigurationValuesChanged, useConfigurationValues, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
+    import { DetailBlockBox } from "@Obsidian/ViewModels/Blocks/detailBlockBox";
+    import { RelationshipStrengthDescription } from "@Obsidian/Enums/Group/relationshipStrength";
+    import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
+    import { GroupDetailOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailOptionsBag";
+    import { CopyGroupRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/copyGroupRequestBag";
+    import { ValidPropertiesBox } from "@Obsidian/ViewModels/Utility/validPropertiesBox";
+    import ViewPanel from "./GroupDetail/viewPanel.partial.obs";
+    import EditPanel from "./GroupDetail/editPanel.partial.obs";
+    import CopyModal from "./GroupDetail/copyModal.partial.obs";
+    import { BlockActionName } from "./GroupDetail/types.partial";
+
+    const config = useConfigurationValues<DetailBlockBox<GroupBag, GroupDetailOptionsBag>>();
+    const invokeBlockAction = useInvokeBlockAction();
+
+    onConfigurationValuesChanged(useReloadBlock());
+
+    // #region Values
+
+    const blockError = ref(config.errorMessage ?? "");
+    const errorMessage = ref("");
+
+    const groupViewBag = ref<GroupBag>(config.entity ?? {} as GroupBag);
+    const panelMode = ref<DetailPanelMode>(DetailPanelMode.View);
+
+    const isCopyModalVisible = ref(false);
+    const isArchiveChildPromptVisible = ref(false);
+    const archiveResolution = ref<((value: BlockActionName.Archive | BlockActionName.ArchiveWithChildren | false) => void) | null>(null);
+
+    // #endregion
+
+    // #region Computed Values
+
+    const panelName = computed((): string => groupViewBag.value?.name ?? "");
+
+    const entityKey = computed((): string => groupViewBag.value?.idKey ?? "");
+
+    const entityTypeGuid = computed((): string | undefined => config.entityTypeGuid ?? undefined);
+
+    const entityTypeName = computed((): string => config.entityTypeName ?? "Group");
+
+    const options = computed((): GroupDetailOptionsBag => config.options ?? {} as GroupDetailOptionsBag);
+
+    const canEdit = computed((): boolean => groupViewBag.value?.canEdit === true);
+
+    const isDeleteVisible = computed((): boolean => options.value.isDeleteVisible === true);
+
+    const isTagListShown = computed((): boolean => options.value.isTagListShown === true);
+
+    /**
+     * Labels rendered as chips next to the title (or in the subheader,
+     * depending on showLabelsInHeader). Phase 1 surfaces GroupType,
+     * Campus, Public, Relationship Strength, plus the standard state
+     * labels (Inactive, Archived).
+     */
+    const blockLabels = computed((): PanelAction[] => {
+        if (panelMode.value !== DetailPanelMode.View) {
+            return [];
+        }
+
+        const labels: PanelAction[] = [];
+        const bag = groupViewBag.value;
+
+        if (bag.isArchived) {
+            labels.push({ title: "Archived", type: "warning" });
+        }
+
+        if (!bag.isActive) {
+            labels.push({ title: "Inactive", type: "warning" });
+        }
+
+        if (bag.relationshipStrength != null) {
+            const strengthLabel = RelationshipStrengthDescription[bag.relationshipStrength];
+            if (strengthLabel) {
+                labels.push({ title: strengthLabel, type: "default" });
+            }
+        }
+
+        if (bag.groupType?.name) {
+            const groupTypeUrl = bag.groupType.url;
+            labels.push({
+                title: bag.groupType.name,
+                type: "default",
+                handler: groupTypeUrl
+                    ? () => {
+                        window.location.href = groupTypeUrl;
+                    }
+                    : undefined
+            });
+        }
+
+        if (bag.campusName) {
+            labels.push({ title: bag.campusName, type: "default" });
+        }
+
+        if (bag.isPublic) {
+            labels.push({ title: "Public", type: "info" });
+        }
+
+        return labels;
+    });
+
+    /**
+     * Footer secondary actions (right side of the panel footer). The
+     * Copy button shows when ShowCopyButton is enabled and the user has
+     * EDIT auth. Security and Edit are framework-managed.
+     */
+    const footerSecondaryActions = computed((): PanelAction[] => {
+        const actions: PanelAction[] = [];
+
+        if (panelMode.value === DetailPanelMode.View && options.value.isCopyButtonShown) {
+            actions.push({
+                title: "Copy",
+                type: "default",
+                handler: openCopyModal
+            });
+        }
+
+        return actions;
+    });
+
+    /**
+     * Footer primary actions (left side of the panel footer). Phase 1
+     * surfaces Archive in view mode when ShouldShowArchiveInsteadOfDelete
+     * is true; the Vue layer would otherwise rely on the framework's
+     * Delete button which is hidden by IsDeleteHidden in that case.
+     */
+    const footerActions = computed((): PanelAction[] => {
+        const actions: PanelAction[] = [];
+
+        if (panelMode.value === DetailPanelMode.View && options.value.isArchiveVisible) {
+            actions.push({
+                title: "Archive",
+                type: "danger",
+                handler: onArchiveClick
+            });
+        }
+
+        return actions;
+    });
+
+    // #endregion
+
+    // #region Functions
+
+    function openCopyModal(): void {
+        isCopyModalVisible.value = true;
+    }
+
+    /**
+     * Opens the archive-children prompt and awaits the user's choice.
+     * Resolves with the block-action name to invoke:
+     * `BlockActionName.ArchiveWithChildren` for Yes,
+     * `BlockActionName.Archive` for No (or the modal close button,
+     * which the original WebForms flow also treated as
+     * archive-parent-only).
+     */
+    function showArchiveChildPrompt(): Promise<BlockActionName.Archive | BlockActionName.ArchiveWithChildren | false> {
+        return new Promise(resolve => {
+            archiveResolution.value = resolve;
+            isArchiveChildPromptVisible.value = true;
+        });
+    }
+
+    // #endregion
+
+    // #region Event Handlers
+
+    /**
+     * Cancel from edit mode returns to view mode (no block action call;
+     * mirrors the WebForms btnCancel_Click behavior at GroupDetail.ascx.cs:1496-1499).
+     */
+    async function onCancelEdit(): Promise<boolean | string> {
+        return true;
+    }
+
+    /**
+     * Edit click. Phase 1 invokes the placeholder Edit block action and
+     * switches the panel into edit mode where the EditPanel renders the
+     * "Phase 2" stub.
+     */
+    async function onEdit(): Promise<boolean> {
+        const result = await invokeBlockAction<ValidPropertiesBox<GroupBag>>(BlockActionName.Edit, {
+            key: groupViewBag.value?.idKey
+        });
+
+        if (result.isSuccess) {
+            return true;
+        }
+
+        errorMessage.value = result.errorMessage ?? "Unable to enter edit mode.";
+        return false;
+    }
+
+    /**
+     * Delete click. Confirms with the user, then calls the Delete block
+     * action and follows the redirect URL it returns.
+     */
+    async function onDelete(): Promise<false | string> {
+        errorMessage.value = "";
+
+        const confirmed = await confirmDelete("Group");
+        if (!confirmed) {
+            return false;
+        }
+
+        const result = await invokeBlockAction<string>(BlockActionName.Delete, {
+            key: groupViewBag.value?.idKey
+        });
+
+        if (result.isSuccess && result.data) {
+            return result.data;
+        }
+
+        errorMessage.value = result.errorMessage ?? "Unable to delete the group.";
+        return false;
+    }
+
+    /**
+     * Archive click. Confirms, then if the bag indicates child groups
+     * exist, opens the child-archive prompt and routes to either
+     * <c>Archive</c> (No) or <c>ArchiveWithChildren</c> (Yes). When no
+     * children exist, calls <c>Archive</c> directly. Single round-trip
+     * in both branches; the prompt-or-not decision is made client-side
+     * from the bag's <c>hasChildGroups</c> flag.
+     */
+    async function onArchiveClick(): Promise<void> {
+        errorMessage.value = "";
+
+        const confirmed = await confirm("Are you sure you want to archive this group?");
+        if (!confirmed) {
+            return;
+        }
+
+        const cascadeAction = groupViewBag.value?.hasChildGroups
+            ? await showArchiveChildPrompt()
+            : BlockActionName.Archive;
+
+        if (!cascadeAction) {
+            return;
+        }
+
+        const result = await invokeBlockAction<string>(cascadeAction, {
+            key: groupViewBag.value?.idKey
+        });
+
+        if (result.isSuccess && result.data) {
+            window.location.href = result.data;
+            return;
+        }
+
+        errorMessage.value = result.errorMessage ?? "Unable to archive the group.";
+    }
+
+    /** "Yes" from the archive-children prompt: cascade to descendants. */
+    function onArchiveCascade(): void {
+        isArchiveChildPromptVisible.value = false;
+
+        if (archiveResolution.value) {
+            archiveResolution.value(BlockActionName.ArchiveWithChildren);
+            archiveResolution.value = null;
+        }
+    }
+
+    /** "No" from the archive-children prompt: archive the parent only. */
+    function onArchiveSingle(): void {
+        isArchiveChildPromptVisible.value = false;
+
+        if (archiveResolution.value) {
+            archiveResolution.value(BlockActionName.Archive);
+            archiveResolution.value = null;
+        }
+    }
+
+    /**
+     * Save from the Copy modal. Calls <c>Copy</c> and follows the redirect
+     * URL it returns (which always points at the new group; per
+     * 18-cross-block-dependencies.md the Copy flow does NOT honor
+     * returnUrl).
+     */
+    async function onCopySave(bag: CopyGroupRequestBag): Promise<void> {
+        errorMessage.value = "";
+
+        const result = await invokeBlockAction<string>(BlockActionName.Copy, {
+            bag: {
+                ...bag,
+                key: groupViewBag.value?.idKey
+            } satisfies CopyGroupRequestBag
+        });
+
+        isCopyModalVisible.value = false;
+
+        if (result.isSuccess && result.data) {
+            window.location.href = result.data;
+            return;
+        }
+
+        errorMessage.value = result.errorMessage ?? "Unable to copy the group.";
+    }
+
+    // #endregion
+
+    // Register the group in the user's "Groups" Quick Return menu when
+    // viewing an existing group. Skip in Add mode (no entity yet).
+    if (panelMode.value === DetailPanelMode.View && groupViewBag.value?.name && groupViewBag.value?.idKey) {
+        addQuickReturn(groupViewBag.value.name, "Groups", 20);
+    }
+</script>

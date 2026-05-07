@@ -1,0 +1,24 @@
+<!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
+<template>
+    <NotificationBox alertType="info">
+        <strong>Edit panel coming in Phase 2.</strong>
+        Click Cancel to return to view mode.
+    </NotificationBox>
+
+    <div class="actions">
+        <RockButton btnType="link" @click="onCancel">Cancel</RockButton>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import RockButton from "@Obsidian/Controls/rockButton.obs";
+
+    const emit = defineEmits<{
+        (e: "cancel"): void;
+    }>();
+
+    function onCancel(): void {
+        emit("cancel");
+    }
+</script>

@@ -1,0 +1,274 @@
+<!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
+<template>
+    <div class="row group-detail-view">
+        <div class="col-md-7">
+            <div class="overview-card">
+                <div v-if="modelValue?.photoUrl" class="overview-image">
+                    <img :src="modelValue.photoUrl" :alt="modelValue.name ?? ''" />
+                </div>
+
+                <p v-if="modelValue?.description" class="overview-description">
+                    {{ modelValue.description }}
+                </p>
+
+                <dl class="overview-fields">
+                    <template v-if="modelValue?.administrator">
+                        <dt>Group Administrator</dt>
+                        <dd>
+                            <a v-if="modelValue.administrator.url" :href="modelValue.administrator.url">{{ modelValue.administrator.name }}</a>
+                            <span v-else>{{ modelValue.administrator.name }}</span>
+                        </dd>
+                    </template>
+
+                    <template v-if="modelValue?.parentGroup">
+                        <dt>Parent Group</dt>
+                        <dd>
+                            <a v-if="modelValue.parentGroup.url" :href="modelValue.parentGroup.url">{{ modelValue.parentGroup.name }}</a>
+                            <span v-else>{{ modelValue.parentGroup.name }}</span>
+                        </dd>
+                    </template>
+
+                    <template v-if="modelValue?.scheduleFriendlyText">
+                        <dt>Schedule</dt>
+                        <dd>{{ modelValue.scheduleFriendlyText }}</dd>
+                    </template>
+
+                    <template v-if="modelValue?.groupCapacity != null">
+                        <dt>Group Capacity</dt>
+                        <dd>{{ modelValue.groupCapacity }}</dd>
+                    </template>
+
+                    <template v-if="modelValue?.groupGoal">
+                        <dt>Goal of Group</dt>
+                        <dd>{{ modelValue.groupGoal }}</dd>
+                    </template>
+
+                    <template v-if="modelValue?.neighborhood">
+                        <dt>Neighborhood</dt>
+                        <dd>{{ modelValue.neighborhood }}</dd>
+                    </template>
+
+                    <template v-if="modelValue?.privacy">
+                        <dt>Privacy</dt>
+                        <dd>{{ modelValue.privacy }}</dd>
+                    </template>
+
+                    <template v-if="modelValue?.groupPreference">
+                        <dt>Group Preference</dt>
+                        <dd>{{ modelValue.groupPreference }}</dd>
+                    </template>
+                </dl>
+
+                <div v-if="hasLinkages" class="overview-linkages">
+                    <h5>Linkages</h5>
+
+                    <div v-if="registrations.length" class="linkage-group">
+                        <h6>Registrations</h6>
+                        <ul>
+                            <li v-for="(item, index) in registrations" :key="`reg-${index}`">
+                                <a :href="item.url ?? '#'">{{ item.name }}</a>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div v-if="eventItemOccurrences.length" class="linkage-group">
+                        <h6>Event Item Occurrences</h6>
+                        <ul>
+                            <li v-for="(item, index) in eventItemOccurrences" :key="`evt-${index}`">
+                                <a :href="item.url ?? '#'">{{ item.name }}</a>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div v-if="contentItems.length" class="linkage-group">
+                        <h6>Content Items</h6>
+                        <ul>
+                            <li v-for="(item, index) in contentItems" :key="`ci-${index}`">
+                                <a :href="item.url ?? '#'">{{ item.name }}</a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div v-if="hasGroupTools" class="group-tools-card">
+                <h4>Group Tools</h4>
+
+                <div v-if="hasParticipationTools" class="tool-group">
+                    <h5>Participation</h5>
+                    <ul class="tool-list">
+                        <li v-if="options.isAttendanceVisible">
+                            <a :href="resolveUrl(navigationUrls?.[NavigationUrlKey.AttendancePage])" class="tool-link">
+                                <i class="ti ti-clipboard-check"></i>
+                                <span>Attendance</span>
+                            </a>
+                        </li>
+                        <li v-if="options.isSchedulerVisible">
+                            <a :href="resolveUrl(navigationUrls?.[NavigationUrlKey.GroupSchedulerPage])" class="tool-link">
+                                <i class="ti ti-calendar"></i>
+                                <span>Scheduler</span>
+                            </a>
+                        </li>
+                        <li v-if="options.isRsvpVisible">
+                            <a :href="resolveUrl(navigationUrls?.[NavigationUrlKey.GroupRSVPPage])" class="tool-link">
+                                <i class="ti ti-circle-check"></i>
+                                <span>RSVP</span>
+                            </a>
+                        </li>
+                        <li v-if="options.isPlacementVisible">
+                            <a :href="resolveUrl(navigationUrls?.[NavigationUrlKey.GroupPlacementPage])" class="tool-link">
+                                <i class="ti ti-arrows-right-left"></i>
+                                <span>Placement</span>
+                            </a>
+                        </li>
+                        <li v-if="options.isFundraisingVisible">
+                            <a :href="resolveUrl(navigationUrls?.[NavigationUrlKey.FundraisingProgressPage])" class="tool-link">
+                                <i class="ti ti-currency-dollar"></i>
+                                <span>Fundraising</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <div v-if="hasViewTools" class="tool-group">
+                    <h5>Views</h5>
+                    <ul class="tool-list">
+                        <li v-if="options.isMapVisible">
+                            <a :href="resolveUrl(navigationUrls?.[NavigationUrlKey.GroupMapPage])" class="tool-link">
+                                <i class="ti ti-map"></i>
+                                <span>Interactive Map</span>
+                            </a>
+                        </li>
+                        <li v-if="options.isHistoryVisible">
+                            <a :href="resolveUrl(navigationUrls?.[NavigationUrlKey.GroupHistoryPage])" class="tool-link">
+                                <i class="ti ti-history"></i>
+                                <span>History</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<style scoped>
+    .group-detail-view .overview-card,
+    .group-detail-view .group-tools-card {
+        padding: 16px;
+    }
+
+    .group-detail-view .overview-image img {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        border-radius: 4px;
+        margin-bottom: 16px;
+    }
+
+    .group-detail-view .overview-description {
+        margin-bottom: 16px;
+    }
+
+    .group-detail-view .overview-fields dt {
+        font-weight: 600;
+        margin-top: 8px;
+    }
+
+    .group-detail-view .overview-fields dd {
+        margin-bottom: 8px;
+    }
+
+    .group-detail-view .overview-linkages {
+        border-top: 1px solid #eaedf0;
+        margin-top: 16px;
+        padding-top: 16px;
+    }
+
+    .group-detail-view .linkage-group + .linkage-group {
+        margin-top: 12px;
+    }
+
+    .group-detail-view .tool-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .group-detail-view .tool-list li + li {
+        margin-top: 4px;
+    }
+
+    .group-detail-view .tool-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+</style>
+
+<script setup lang="ts">
+    import { computed, PropType } from "vue";
+    import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
+    import { GroupDetailOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailOptionsBag";
+    import { GroupLinkageBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLinkageBag";
+    import { NavigationUrlKey } from "./types.partial";
+
+    const props = defineProps({
+        modelValue: {
+            type: Object as PropType<GroupBag | null>,
+            required: false
+        },
+
+        options: {
+            type: Object as PropType<GroupDetailOptionsBag>,
+            required: true
+        },
+
+        navigationUrls: {
+            type: Object as PropType<Record<string, string> | null>,
+            required: false
+        }
+    });
+
+    // #region Computed Values
+
+    const registrations = computed((): GroupLinkageBag[] => props.modelValue?.linkages?.registrations ?? []);
+    const eventItemOccurrences = computed((): GroupLinkageBag[] => props.modelValue?.linkages?.eventItemOccurrences ?? []);
+    const contentItems = computed((): GroupLinkageBag[] => props.modelValue?.linkages?.contentItems ?? []);
+
+    const hasLinkages = computed((): boolean => registrations.value.length > 0
+        || eventItemOccurrences.value.length > 0
+        || contentItems.value.length > 0);
+
+    const hasParticipationTools = computed((): boolean => {
+        const o = props.options;
+        return Boolean(o.isAttendanceVisible || o.isSchedulerVisible || o.isRsvpVisible || o.isPlacementVisible || o.isFundraisingVisible);
+    });
+
+    const hasViewTools = computed((): boolean => {
+        const o = props.options;
+        return Boolean(o.isMapVisible || o.isHistoryVisible);
+    });
+
+    const hasGroupTools = computed((): boolean => hasParticipationTools.value || hasViewTools.value);
+
+    // #endregion
+
+    // #region Functions
+
+    /**
+     * Substitute the active group's IdKey into a server-supplied URL.
+     * The C# side emits each outbound URL with a literal `((Key))`
+     * token that the Vue layer replaces here per the Q4 IdKey policy.
+     */
+    function resolveUrl(url: string | null | undefined): string {
+        if (!url || !props.modelValue?.idKey) {
+            return "";
+        }
+        return url.replace("((Key))", props.modelValue.idKey);
+    }
+
+    // #endregion
+</script>
