@@ -67,7 +67,17 @@ Research finding: dead code with no observable consumers.
 
 ### Q4. IdKey adoption — accept and write, with a dedicated dependencies phase
 
-**Resolved:** GroupDetail accepts both integer Id and IdKey on inbound page parameters and writes IdKey on **all 11** outbound LinkedPage URLs uniformly (no per-destination special-casing). The 5 still-WebForms destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) will break under IdKey URLs until they are updated to accept IdKey, which is now scoped as a new "Update dependencies" phase preceding cutover. See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md).
+**Resolved:** GroupDetail accepts both integer Id and IdKey on inbound page parameters and writes IdKey for **every Id-style page parameter it emits on outbound URLs** (no per-destination, no per-parameter special-casing). This is broader than just the GroupId parameter:
+
+- The GroupId parameter on the 11 outbound LinkedPage destinations.
+- The other entity Ids GroupDetail emits inside its own URL building: `RegistrationInstanceId` (RegistrationInstancePage), `EventItemOccurrenceId` (EventItemOccurrencePage), `ContentItemId` (ContentItemPage), and `SourceGroup` (GroupPlacementPage).
+- Self-referential URLs the block authors, like the breadcrumb URL.
+
+Receiving blocks tolerate IdKey on these parameters today. RegistrationInstanceDetail (Obsidian) uses the standard `Get(key, !DisablePredictableIds)` resolver. EventItemOccurrenceDetail and ContentChannelItemDetail (still WebForms) use `GetQueryableByKey(key, IsAllowingPredictableIds)` which is the WebForms equivalent. GroupPlacement (Obsidian) uses `IdHasher.Instance.GetId(...) ?? .AsIntegerOrNull()`. All three forms accept IdKey today.
+
+The 5 still-WebForms destinations on the GroupId path (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) will break under IdKey URLs until they are updated to accept IdKey, which is scoped as the "Update dependencies" phase (Phase 7) preceding cutover. See [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md).
+
+**Why uniform across all parameters, not just GroupId:** The Q4 audit during Phase 1 implementation found that GroupId-only normalization is inconsistent — the bag emits four different Id types in linkage URLs (Group, RegistrationInstance, EventItemOccurrence, ContentChannelItem), and a mixed integer/IdKey policy makes the block harder to reason about. Uniform IdKey emission is also the broader Rock convention going forward (the IdKey extension on `Entity<T>` is the canonical Id surfacing). The receiving blocks already handle it.
 
 ### Q5. Block-type chop strategy — startup chop
 
@@ -86,7 +96,7 @@ Run `node .claude/skills/convert-block/scripts/generate-guids.js` to obtain the 
 
 **Background.** Listed under "New" in the edit-mode designer notes in the Figma. No corresponding visual element observed in any captured screenshot. Could be a feature flag, a hidden region, or internal Triumph terminology.
 
-**Resolved:** "Trailblazer" settings are individual fields that the Figma highlights in blue on the edit panel (advanced / power-user fields). User confirmed inspection of the Figma shows them only in the General content section. Implementation: the affected controls take a `trailBlazerField` prop that drives the blue-highlight styling. NOT a net-new feature, NOT a separate panel; Phase 2 (which owns the General section) wires this up where applicable. Phase 6 stays empty unless something else surfaces.
+**Resolved:** "Trailblazer" settings are individual fields that the Figma highlights in blue on the edit panel (advanced / power-user fields). User confirmed inspection of the Figma shows them only in the General content section. Implementation: the affected controls take a `trailBlazerField` prop that drives the blue-highlight styling. NOT a net-new feature, NOT a separate panel; **Phase 3** (which owns the General section) wires this up where applicable. The original plan held a separate "Phase 6 net-new features" slot in case Trailblazer turned out to be substantial; with Trailblazer reduced to a per-field prop, that slot was confirmed empty and dropped during the 2026-05-06 view-first reordering.
 
 ### Q7. Audit modal — content and visual
 
@@ -110,7 +120,7 @@ So this is not a "reuse vs. new" question; it is a "what do we name the new colu
 | **(a)** | `PhotoId` (int? → BinaryFile) | Mirrors `Person.PhotoId`. Per the Prime Directive (follow existing patterns), this is the cross-Rock convention for "primary entity image." |
 | **(b)** | `HeroImageBinaryFileId` (int? → BinaryFile) | Group-internal-consistent with `ChatChannelAvatarBinaryFileId`. More descriptive of intent (the image is a 16:9 hero, not a person-style headshot). |
 
-**Resolved:** Add `Group.PhotoId` (nullable int → BinaryFile, FK with `WillCascadeOnDelete(false)` and `ON DELETE SET NULL` per data-model rules), mirroring `Person.PhotoId`. Per the Prime Directive, follow the existing cross-Rock convention. Apply the same `IsTemporary` toggle pattern the chat-channel-avatar uses for orphan cleanup. The column add (entity + migration + EntityTypeConfiguration nav property + codegen regen) lands in **Phase 2** alongside the chat-avatar editing work. See [research/webforms/14-chat.md](../webforms/14-chat.md) and [research/webforms/23-validations-and-cascades.md](../webforms/23-validations-and-cascades.md). Phase 1 (View panel) wires up the hero region but the bag's photo URL is always null until Phase 2 ships, so the region omits during the gap.
+**Resolved:** Add `Group.PhotoId` (nullable int → BinaryFile, FK with `WillCascadeOnDelete(false)` and `ON DELETE SET NULL` per data-model rules), mirroring `Person.PhotoId`. Per the Prime Directive, follow the existing cross-Rock convention. Apply the same `IsTemporary` toggle pattern the chat-channel-avatar uses for orphan cleanup. The column add (entity + migration + EntityTypeConfiguration nav property + codegen regen) lands in **Phase 2** (Complete the view panel). The uploader (using the `IsTemporary` toggle) lands in **Phase 3** alongside the chat-channel-avatar uploader. See [research/webforms/14-chat.md](../webforms/14-chat.md) and [research/webforms/23-validations-and-cascades.md](../webforms/23-validations-and-cascades.md). Phase 1 (View panel core) wires up the hero region but the bag's photo URL is always null until Phase 2 ships, so the region omits during the gap.
 
 ### Q9. Sync Frequency control
 
@@ -118,7 +128,7 @@ So this is not a "reuse vs. new" question; it is a "what do we name the new colu
 
 **Open question:** build a new dedicated component, restyle `IntervalPicker`, or inline a segmented control plus a basic `<RangeSlider>`?
 
-**Resolved:** Reuse the existing Obsidian `<IntervalPicker>` (option b). It already supports the Mins / Hours / Days unit segmentation natively; the work is purely a styling change so the unit toggle renders above the numeric/slider input instead of inline. Phase 4 owns the restyle. Do this via a scoped variant (prop or local style override) so other `<IntervalPicker>` consumers across Rock are not affected; Phase 4 spec records the exact mechanism after a quick component audit.
+**Resolved:** Reuse the existing Obsidian `<IntervalPicker>` (option b). It already supports the Mins / Hours / Days unit segmentation natively; the work is purely a styling change so the unit toggle renders above the numeric/slider input instead of inline. Phase 5 owns the restyle. Do this via a scoped variant (prop or local style override) so other `<IntervalPicker>` consumers across Rock are not affected; Phase 5 spec records the exact mechanism after a quick component audit.
 
 ### Q10. Sections & Stacks + Conditional Well — reuse existing core components
 
@@ -146,10 +156,10 @@ Six pre-existing bugs surfaced during research. Each needs a Phase 0 classificat
 
 | # | Bug | Source | Resolution | Lands in |
 |---|---|---|---|---|
-| L1 | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../webforms/04-code-behind-walkthrough.md) | fix-during (trivial; the new code structure naturally avoids it). | Phase 2 (edit core / GroupType edit details). |
+| L1 | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../webforms/04-code-behind-walkthrough.md) | fix-during (trivial; the new code structure naturally avoids it). | Phase 3 (edit core / GroupType edit details). |
 | L2 | Possible duplicate-edit corruption in group requirements. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | defer-to-bugfix-spec for confirmation; not blocking. | Separate `/bugfix` spec. |
-| L3 | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | fix-during (use `EntityTypeCache.Get<DataView>().Id`). | Phase 4 (requirements modal). |
-| L4 | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding). | [research/webforms/13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." | Phase 4 (member workflow triggers). |
+| L3 | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | fix-during (use `EntityTypeCache.Get<DataView>().Id`). | Phase 5 (requirements modal). |
+| L4 | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding). | [research/webforms/13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." | Phase 5 (member workflow triggers). |
 | L5 | Missing `TagCategory` block attribute (referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared). | [research/webforms/27-misc-surfaces.md](../webforms/27-misc-surfaces.md) | drop the reference; latent dead code with no consumer. | Phase 1 (block-attribute declarations); simply do not port the reference. |
 | L6 | Open-redirect risk on `returnUrl` parameter (no validation). | [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) | fix-during. Validate same-origin or reject. | Phase 1 (Delete/Archive/Copy redirect handling reads `returnUrl`). |
 
@@ -196,18 +206,18 @@ Mirror `groupTypeDetail.obs`:
 Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs              # top-level shell
 Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/
   viewPanel.partial.obs                                                # Phase 1
-  editPanel.partial.obs                                                # Phase 2 (orchestrates section partials)
-  mapCard.partial.obs                                                  # Phase 5 (per-location card; conditional)
-  groupAttributesPanel.partial.obs                                     # Phase 3
-  memberAttributesPanel.partial.obs                                    # Phase 3
-  requirementsPanel.partial.obs                                        # Phase 4
-  syncPanel.partial.obs                                                # Phase 4
-  workflowsPanel.partial.obs                                           # Phase 4
-  locationsPanel.partial.obs                                           # Phase 5 (Section 4 stacks)
-  syncRuleModal.partial.obs                                            # Phase 4
-  workflowModal.partial.obs                                            # Phase 4
-  requirementModal.partial.obs                                         # Phase 4
-  locationModal.partial.obs                                            # Phase 5
+  editPanel.partial.obs                                                # Phase 3 (orchestrates section partials)
+  mapCard.partial.obs                                                  # Phase 2 (per-location card; conditional; view-side)
+  groupAttributesPanel.partial.obs                                     # Phase 4
+  memberAttributesPanel.partial.obs                                    # Phase 4
+  requirementsPanel.partial.obs                                        # Phase 5
+  syncPanel.partial.obs                                                # Phase 5
+  workflowsPanel.partial.obs                                           # Phase 5
+  locationsPanel.partial.obs                                           # Phase 6 (Section 4 stacks; edit-side)
+  syncRuleModal.partial.obs                                            # Phase 5
+  workflowModal.partial.obs                                            # Phase 5
+  requirementModal.partial.obs                                         # Phase 5
+  locationModal.partial.obs                                            # Phase 6
   copyModal.partial.obs                                                # Phase 1
   auditModal.partial.obs                                               # Phase 1
   types.partial.ts                                                     # NavigationUrlKey, enums, helpers
@@ -238,21 +248,21 @@ Rock.ViewModels/Blocks/Group/GroupDetail/
 
 ### Phase roadmap
 
-Per [ROADMAP.md](ROADMAP.md), tightened by [research/design/](../design/):
+Per [ROADMAP.md](ROADMAP.md), tightened by [research/design/](../design/) and reordered after Phase 1's self-review (see "View-first reordering" note below):
 
 | Phase | Title | Output |
 |---|---|---|
 | 0 | Architecture & Phase 1 spec | This document + `01-phase-1-shell-and-view.md` |
-| 1 | Block shell + View panel + Delete/Archive/Copy + Audit modal + Linkages bag | Working view-mode block. Edit mode is placeholder. |
-| 2 | Edit panel core (Top fields + General + RSVP + Scheduling + Chat sections) | All scalar field editing + cascade reactivity. |
-| 3 | Attributes (Group + Member definitions) | Attribute editor working. |
-| 4 | Requirements + Sync + Member Workflows | Three sub-feature panels with modals. |
-| 5 | Locations & Schedules (incl. Map Cards in view) | Most complex sub-feature; meeting details fully editable. |
-| 6 | Net-new features beyond the parity-plus-design baseline | Likely empty unless Trailblazer Settings becomes substantial. |
+| 1 | Block shell + View panel core + Delete/Archive/Copy + Audit modal + Linkages bag | Working view-mode block (mostly). Group Image hero region wired but `bag.photoUrl` always null until Phase 2. Meeting Locations card NOT yet rendered. Edit mode is a placeholder. |
+| 2 | Complete the view panel | New `Group.PhotoId` column + migration + nav property + codegen regen. Group Image hero rendering. Meeting Locations card with map cards (read-only). View-panel design fidelity is now complete. |
+| 3 | Edit panel core (Top fields + General + RSVP + Scheduling + Chat) | All scalar-field editing + Save flow + GroupType cascade reactivity (Q2 Approach B). Group photo uploader and chat-channel-avatar uploader (both use the `IsTemporary` BinaryFile pattern). Add path. `?autoEdit=true` handling. Trailblazer per-field styling (Q6). |
+| 4 | Attributes (Group + Member definitions) | Attribute editor working. |
+| 5 | Requirements + Sync + Member Workflows | Three sub-feature panels with modals. Sync Frequency restyle on existing `<IntervalPicker>` per Q9. L3 / L4 fix-during. |
+| 6 | Locations editing modal + inline schedule logic | Editing-side of Meeting Details (the read-side map cards already shipped in Phase 2). Inline schedule entity management. Most complex sub-feature. |
 | 7 | Update dependencies | Update the 5 still-WebForms destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) so each accepts IdKey on its `GroupId` page parameter. Required because Phase 1+ writes IdKey to all 11 outbound URLs (per Q4) and these 5 destinations will be broken until updated. |
 | 8 | Cutover and cleanup | Verify chop, delete WebForms files, smoke test cross-block callers, release notes. |
 
-Per [research/design/03-net-new-features.md](../design/03-net-new-features.md), the design pass folded the prior Phase 6 (View panel redesign) into Phase 1 because the Figma is locked.
+**View-first reordering (post-Phase 1 self-review).** The original phase plan deferred the Meeting Locations card to old Phase 5 and the `Group.PhotoId` column add to old Phase 2 (bundled with chat-avatar editing), leaving the view panel half-finished across four phases. After Phase 1's self-review the user requested view-first: complete the entire read-only experience in the next phase before any edit-panel work begins. The new Phase 2 (Complete the view panel) absorbs both the column add and the Meeting Locations card view-side. The edit panel and sub-features simply shift down by one number. The original "Phase 6 net-new features" slot was Q6-confirmed empty (Trailblazer is a per-field prop on General-section controls in Phase 3, not a separate feature) and is dropped.
 
 ## Cross-block follow-on tracking
 
@@ -323,9 +333,11 @@ After Phase 0, every later phase reads this locked document at session start, fo
 
 Notable resolutions worth flagging here:
 - Q1: dropped `[ContextAware(typeof(Group))]` and `ContextEntityBlock` base.
-- Q2: GroupType cascade uses Approach B (server round-trip); the `GetGroupTypeOptions` block action is required by Phase 2.
-- Q4: GroupDetail writes IdKey uniformly to all 11 outbound destinations; the 5 still-WebForms destinations are scoped into the new **Phase 7 ("Update dependencies")** to accept IdKey before cutover. The phase roadmap was renumbered to 9 phases (0-8) as a result.
-- Q8: `Group.PhotoId` does not exist today; a new column is added in Phase 2 (mirroring `Person.PhotoId`).
-- Q9: Sync Frequency reuses the existing Obsidian `<IntervalPicker>` with a Phase 4 styling pass.
+- Q2: GroupType cascade uses Approach B (server round-trip); the `GetGroupTypeOptions` block action is required by **Phase 3** (post-reordering; was Phase 2 in the original plan).
+- Q4: GroupDetail writes IdKey uniformly to all 11 outbound destinations; the 5 still-WebForms destinations are scoped into **Phase 7 ("Update dependencies")** to accept IdKey before cutover. The phase roadmap is 9 phases (0-8) total.
+- Q8: `Group.PhotoId` does not exist today; a new column is added in **Phase 2** (mirroring `Person.PhotoId`). The uploader using the `IsTemporary` BinaryFile pattern lands in **Phase 3** alongside chat-avatar editing.
+- Q9: Sync Frequency reuses the existing Obsidian `<IntervalPicker>` with a **Phase 5** styling pass.
 - Q10: `<ContentSection>`, `<ContentStack>`, `<ConditionalWell>` already ship as core components; reuse, do not rebuild.
-- Q12: latent bugs assigned per-phase landing slots; L2 is the only bug deferred to a separate `/bugfix` spec.
+- Q12: latent bugs assigned per-phase landing slots (L1: Phase 3; L3, L4: Phase 5); L2 is the only bug deferred to a separate `/bugfix` spec. L5 (TagCategory dead reference dropped) and L6 (returnUrl same-origin validation) shipped in Phase 1.
+
+**View-first reordering applied 2026-05-06** after Phase 1 self-review. The new Phase 2 ("Complete the view panel") was inserted between Phase 1 and the original Phase 2 (now Phase 3); Phases 3-5 each shifted down by one number; the old Phase 6 (Net-new features) was Q6-confirmed empty and dropped. See [ROADMAP.md](ROADMAP.md) "Why view-first" section for the full rationale.

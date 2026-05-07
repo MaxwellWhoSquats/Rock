@@ -6,7 +6,7 @@ Working directory for the multi-phase Obsidian conversion of `RockWeb/Blocks/Gro
 
 - **[webforms/](webforms/)** — research on the existing WebForms block: configuration, behavior, code-behind walkthrough, sub-features, dependencies, portability gaps. Start at [webforms/INDEX.md](webforms/INDEX.md).
 - **[design/](design/)** — research on the new design (Figma): layout, components, net-new features, redesign decisions. Start at [design/README.md](design/README.md).
-- **[specs/](specs/)** — master architecture spec and per-phase implementation specs. Start at [specs/INDEX.md](specs/INDEX.md). Phase 0 produces the architecture spec; each later phase reads it plus its own spec.
+- **[specs/](specs/)** — master architecture spec and per-phase implementation specs. Start at specs/INDEX.md. Phase 0 produces the architecture spec; each later phase reads it plus its own spec.
 
 ## Sequence
 

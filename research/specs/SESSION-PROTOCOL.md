@@ -32,6 +32,8 @@ Before writing any code, read these files in this exact order. Read in full, not
 6. **Every file listed in the phase spec's "Research coverage" section**, in full.
 7. **The "Completed" section of every prior phase spec** that is marked `completed` in INDEX.md.
 
+8. **Verify deferred-behavior carry-forward.** Walk every prior phase's coverage report and find every row whose Status is `→ DEFERRED to Phase N` where N matches the current phase. Confirm the current phase spec's "Deferred behaviors inherited from prior phases" section enumerates each. Cross-check that each one is either addressed by an Implementation checklist item OR explicitly re-deferred / dropped (with rationale) under the relevant subsection of inherited-behaviors. If any deferred row points at this phase but isn't accounted for, **stop and ask** — the spec is incomplete.
+
 After reading, build a `TodoWrite` plan that mirrors the phase spec's "Implementation checklist". Each checklist item becomes a todo. Confirm with the user that the plan matches their expectations before starting implementation.
 
 If any step surfaces a contradiction, ambiguity, or missing input, **stop and ask**.
@@ -85,7 +87,7 @@ Build the coverage report as a markdown table. This goes into the phase spec's "
 | Research file | Behavior | Status | Code ref | Notes |
 |---|---|---|---|---|
 | webforms/05-entity-and-services.md | GroupService.Get with IdKey | ✓ | Rock.Blocks/Group/GroupDetail.cs:78 | Uses RockEntityDetailBlockType helper |
-| webforms/05-entity-and-services.md | RockContext.WrapTransaction in save | → Phase 2 | — | Save flow is Phase 2 scope |
+| webforms/05-entity-and-services.md | RockContext.WrapTransaction in save | → Phase 3 | — | Save flow is Phase 3 scope |
 | webforms/16-archive-delete-copy.md | Delete with auth check | ✓ | Rock.Blocks/Group/GroupDetail.cs:289 | |
 | webforms/16-archive-delete-copy.md | DeleteSecurityRoleGroup branch | ✓ | Rock.Blocks/Group/GroupDetail.cs:301 | |
 ```
@@ -126,7 +128,10 @@ After self-review passes, execute these steps:
 5. **Draft the next phase's spec.**
    - Copy `research/specs/PHASE-SPEC-TEMPLATE.md` as the starting point.
    - Save as `research/specs/0(N+1)-phase-(N+1)-<name>.md`.
-   - Author every required section with care. Especially: "Research coverage" must list every research file that informs the next phase's scope, and "Implementation checklist" must enumerate every specific behavior to be implemented.
+   - Author every required section with care. Especially:
+     - "Research coverage" must list every research file that informs the next phase's scope.
+     - "Deferred behaviors inherited from prior phases" must enumerate every row from any prior phase's coverage report (this phase's, plus any earlier phases') whose Status is `→ DEFERRED to Phase (N+1)`. Each inherited row must map to either an Implementation checklist item OR an explicit re-deferral / drop with rationale. See PHASE-SPEC-TEMPLATE.md for the subsection structure.
+     - "Implementation checklist" must enumerate every specific behavior to be implemented, including each inherited-deferred behavior now in scope.
    - Mark status as `draft` in INDEX.md.
    - The user will review this draft before the next session starts.
 6. **Output a commit-ready summary to the user.** Do NOT run `git commit`, `/commit`, or any other git-history-mutating command. Instead:

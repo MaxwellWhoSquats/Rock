@@ -32,16 +32,18 @@ If you are starting a new phase session, the opening prompt should always includ
 |---|---|---|---|---|---|
 | - | [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) | locked | 2026-05-06 | - | Procedural contract for every session |
 | - | [PHASE-SPEC-TEMPLATE.md](PHASE-SPEC-TEMPLATE.md) | locked | 2026-05-06 | - | Template for every phase spec |
-| - | [ROADMAP.md](ROADMAP.md) | locked | 2026-05-06 | - | Strategic phase plan |
-| 00 | [00-architecture.md](00-architecture.md) | **locked** | 2026-05-06 | - | Q1-Q12 resolved during the Phase 0 session |
-| 01 | [01-phase-1-shell-and-view.md](01-phase-1-shell-and-view.md) | **draft** | - | - | Drafted at end of the Phase 0 session; awaiting user review before Phase 1 starts |
-| 02 | `02-phase-2-edit-core.md` | not authored | - | - | Authored at end of Phase 1 |
-| 03 | `03-phase-3-attributes.md` | not authored | - | - | Authored at end of Phase 2 |
-| 04 | `04-phase-4-requirements-sync-workflows.md` | not authored | - | - | Authored at end of Phase 3 |
-| 05 | `05-phase-5-locations-schedules.md` | not authored | - | - | Authored at end of Phase 4 |
-| 06 | `06-phase-6-new-features.md` | conditional | - | - | Likely empty: Q6 confirmed Trailblazer Settings is a per-field prop on General-section controls (Phase 2), not a separate feature |
-| 07 | `07-phase-7-update-dependencies.md` | not authored | - | - | NEW phase per Q4: update the 5 still-WebForms outbound destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) to accept IdKey on `GroupId`. Authored at end of Phase 5 (or 6 if used). |
+| - | [ROADMAP.md](ROADMAP.md) | locked | 2026-05-06 | - | Strategic phase plan. View-first reordering applied 2026-05-06 after Phase 1 self-review. |
+| 00 | [00-architecture.md](00-architecture.md) | **locked** | 2026-05-06 | - | Q1-Q12 resolved during the Phase 0 session. View-first reordering note added 2026-05-06. |
+| 01 | [01-phase-1-shell-and-view.md](01-phase-1-shell-and-view.md) | **completed** | 2026-05-07 | - | Block shell + view panel core + Delete/Archive/Copy + Audit modal + Linkages shipped. Completed section appended to spec. Awaiting user commit; commit hash to be filled in after `git commit` lands. |
+| 02 | [02-phase-2-complete-view-panel.md](02-phase-2-complete-view-panel.md) | **draft** | - | - | Drafted 2026-05-07. Scope: `Group.PhotoId` column add (Q8), `bag.PhotoUrl` population, Meeting Locations card on the right rail with per-`GroupLocation` map cards and hover-expand. All six open questions Q2.1-Q2.6 resolved 2026-05-07: custom `locationCard.partial.obs` using `@Obsidian/Utility/geo` + raw Google Maps in static mode (Q2.1 / Q2.5); `Group.PhotoUrl` computed property mirroring `Person.PhotoUrl` via `FileUrlHelper.GetImageUrl` (Q2.2); shared group-level map URL across cards (Q2.3); tap-on-card on touch (Q2.4); `ShowLocationAddresses=false` suppresses on all card variants (Q2.6). Ready for user lock-pass before the implementing session starts. |
+| 03 | `03-phase-3-edit-core.md` | not authored | - | - | Edit panel core (was Phase 2). Authored at end of Phase 2. |
+| 04 | `04-phase-4-attributes.md` | not authored | - | - | Attributes (was Phase 3). Authored at end of Phase 3. |
+| 05 | `05-phase-5-requirements-sync-workflows.md` | not authored | - | - | Requirements + Sync + Member Workflows (was Phase 4). Authored at end of Phase 4. |
+| 06 | `06-phase-6-locations-editing.md` | not authored | - | - | Locations editing modal + inline schedule logic (was Phase 5). The view-side map cards already shipped in Phase 2. Authored at end of Phase 5. |
+| 07 | `07-phase-7-update-dependencies.md` | not authored | - | - | Per Q4: update the 5 still-WebForms outbound destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) to accept IdKey on `GroupId`. Authored at end of Phase 6. |
 | 08 | `08-cutover.md` | not authored | - | - | Authored at end of Phase 7. Verify chop, delete WebForms files, smoke test cross-block callers, release notes. |
+
+**View-first reordering (2026-05-06).** After Phase 1's self-review the user requested that the entire view panel be completed before any edit-panel work begins. New Phase 2 ("Complete the view panel") was inserted; original Phases 2-5 each shifted down by one number; old Phase 6 (Net-new features, Q6-confirmed empty) was dropped. See [ROADMAP.md "Why view-first"](ROADMAP.md) for rationale.
 
 Status legend:
 - **not authored** — file does not exist yet
@@ -54,12 +56,12 @@ Status legend:
 
 Phase specs are NOT authored upfront. Each phase's spec is drafted at the END of the prior phase's session, while context on what just shipped is fresh.
 
-Sequence:
+Sequence (post-reordering):
 1. **Phase 0 session** outputs `00-architecture.md` (locked) + `01-phase-1-shell-and-view.md` (draft awaiting user review).
-2. **Phase 1 session** locks the Phase 1 spec at session start (with user approval), implements per the spec, then drafts `02-phase-2-edit-core.md` as its closing step.
-3. **Phase 2 session** locks the Phase 2 spec at session start, implements, then drafts `03-phase-3-attributes.md`.
-4. Same pattern through Phase 5.
-5. **Phase 6** runs only if Trailblazer Settings or other Figma items demand net-new work. (Per Q6, Trailblazer is now scoped into Phase 2 as a per-field prop, so Phase 6 is currently expected to be empty.)
+2. **Phase 1 session** locks the Phase 1 spec at session start (with user approval), implements per the spec, then drafts `02-phase-2-complete-view-panel.md` as its closing step.
+3. **Phase 2 session** locks the Phase 2 spec, implements (Group.PhotoId column + Group Image hero + Meeting Locations card), then drafts `03-phase-3-edit-core.md`.
+4. **Phase 3 session** locks Phase 3 spec, implements edit core, drafts `04-phase-4-attributes.md`.
+5. Same pattern through Phase 6 (Locations editing). At each phase close, the next phase's spec is drafted.
 6. **Phase 7** is the dependencies update: the 5 still-WebForms outbound destinations are updated to accept IdKey on their `GroupId` page parameter (per Q4).
 7. **Phase 8** is the cutover: verify chop, delete WebForms files, smoke test, release notes.
 

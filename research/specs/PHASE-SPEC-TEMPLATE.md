@@ -51,7 +51,46 @@ Good: "Adding a new group with name, description, and parent group selection sav
 Bullet list of what is intentionally deferred, with the phase number where it lands.
 
 Bad: "Other things later."
-Good: "Group attribute values: Phase 3. Group requirements editing: Phase 4. Locations & schedules: Phase 5."
+Good: "Group attribute values: Phase 4. Group requirements editing: Phase 5. Locations editing modal: Phase 6."
+
+## Section: Deferred behaviors inherited from prior phases (required)
+
+This section enumerates every behavior marked `→ DEFERRED to Phase N` in any prior phase's "Self-review coverage report" (where N = this phase). The spec author MUST list every such row here at draft time so nothing falls off the radar across sessions.
+
+The implementing model checks this section during opening (per SESSION-PROTOCOL.md Section A8) to verify every inherited-deferred behavior is either addressed by an "Implementation checklist" item OR explicitly re-deferred / dropped below with rationale. If an inherited row is missing, the spec is incomplete and the session must stop and ask.
+
+For Phase 1 this section will be empty (no prior phases). For Phase 2+, populate from prior coverage reports.
+
+### Inherited (covered in this phase's Implementation checklist)
+
+The default case. Each row was deferred from a prior phase to this one and is now in scope.
+
+```markdown
+| Source phase | Behavior | Coverage-report origin | Checklist item that handles it |
+|---|---|---|---|
+| Phase 1 | Group Capacity (scalar field on General panel) | `webforms/16-archive-delete-copy.md` row in Phase 1 coverage report | Item N below |
+| Phase 1 | Trailblazer styling on General-section fields | Phase 1 "Behavior NOT delivered" + design 03-net-new-features item C4 | Items M, M+1 below |
+```
+
+### Re-deferred to a later phase
+
+If anything inherited cannot be addressed in this phase (scope creep, unresolved dependency, etc.), list it here with the new target phase and rationale. The next-phase spec will absorb it via its own "inherited" section.
+
+```markdown
+| Source phase | Behavior | Originally targeted | New target | Rationale |
+|---|---|---|---|---|
+| Phase 1 | <behavior> | Phase N | Phase N+1 | <reason> |
+```
+
+### Dropped (no longer in scope)
+
+If anything inherited is now considered out-of-scope (feature dropped, design changed, parity revisited), list it here with rationale so future phases don't re-pick-it-up.
+
+```markdown
+| Source phase | Behavior | Reason |
+|---|---|---|
+| Phase 1 | <behavior> | <why dropped, who confirmed> |
+```
 
 ## Section: Research coverage (required, mandatory for self-review)
 
@@ -98,9 +137,9 @@ Good checklist item: "Save flow: persist group.Name, group.IsActive, group.IsPub
 Explicit list of behaviors mentioned in research that this phase does NOT cover, with the phase that does.
 
 ```markdown
-- Inline-schedule deletion logic — covered by Phase 5.
-- Chat-channel-avatar IsTemporary toggle — covered by Phase 2.
-- Group requirements editing modal — covered by Phase 4.
+- Inline-schedule deletion logic — covered by Phase 6.
+- Chat-channel-avatar IsTemporary toggle — covered by Phase 3.
+- Group requirements editing modal — covered by Phase 5.
 ```
 
 This list is the explicit "out of scope by design" set. If a behavior is in research but is in NEITHER "Implementation checklist" NOR "Out-of-scope items", that's a gap to flag during user review.
@@ -122,7 +161,7 @@ Organized by project. Mark new vs modify.
 
 ### Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/
 - `viewPanel.partial.obs` (NEW)
-- `editPanel.partial.obs` (NEW, placeholder for Phase 2)
+- `editPanel.partial.obs` (NEW, placeholder for Phase 3)
 - `copyModal.partial.obs` (NEW)
 - `auditModal.partial.obs` (NEW)
 - `types.partial.ts` (NEW)
@@ -193,7 +232,7 @@ Manual test scenarios the user can execute to confirm phase behavior. Numbered, 
 
 ```markdown
 1. Navigate to `/Group/123` (any existing group). Confirm View panel renders with group name, description, image (if set), administrator link, parent group link, schedule, capacity.
-2. Click Edit. Confirm edit-mode panel opens (placeholder for Phase 2 OK).
+2. Click Edit. Confirm edit-mode panel opens (placeholder for Phase 3 OK).
 3. Click Cancel. Confirm view mode returns.
 4. Click Delete. Confirm confirmation dialog. Confirm cancel dismisses dialog. Confirm OK deletes the group and redirects per the WebForms NavigateAfterDeleteOrArchive logic.
 5. With ?autoEdit=true URL parameter, confirm edit panel opens directly.
