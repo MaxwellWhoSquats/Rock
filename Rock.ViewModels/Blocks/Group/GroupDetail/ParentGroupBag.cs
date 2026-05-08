@@ -15,27 +15,28 @@
 // </copyright>
 //
 
+using Rock.ViewModels.Utility;
+
 namespace Rock.ViewModels.Blocks.Group.GroupDetail
 {
     /// <summary>
-    /// Reference to the group's parent group surfaced in the Overview
-    /// card. Carries the parent's friendly name and a server-resolved
-    /// link URL. The URL prefers the Group <c>EntityType.LinkUrlLavaTemplate</c>
-    /// (so customer-customized link rules are honored) and falls back to
-    /// <c>/Group/{IdKey}</c>.
+    /// Reference to the group's parent group. Inherited <c>Value</c>
+    /// carries the parent group Id (as a string) and <c>Text</c> carries
+    /// the parent's friendly name; the picker-shaped base lets the
+    /// edit-mode <c>&lt;GroupPicker&gt;</c> bind to the same field. The
+    /// view-mode Overview card additionally renders a link using the
+    /// pre-resolved <see cref="Url"/>, which prefers the Group
+    /// <c>EntityType.LinkUrlLavaTemplate</c> (so customer-customized
+    /// link rules are honored) and falls back to <c>/Group/{IdKey}</c>.
     /// </summary>
-    public class ParentGroupBag
+    public class ParentGroupBag : ListItemBag
     {
         /// <summary>
-        /// Gets or sets the parent group's friendly name. Rendered as
-        /// the link text.
-        /// </summary>
-        public string Name { get; set; }
-
-        /// <summary>
         /// Gets or sets the pre-resolved detail URL. Null / empty when
-        /// no link can be constructed; the Vue layer falls through to
-        /// rendering the name as plain text.
+        /// no link can be constructed (also during edit-mode emits, where
+        /// the picker overwrites <c>Value</c>/<c>Text</c> without a URL);
+        /// the Vue layer falls through to rendering the name as plain
+        /// text in either case.
         /// </summary>
         public string Url { get; set; }
     }

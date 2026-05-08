@@ -2,7 +2,7 @@
 <template>
     <NotificationBox v-if="blockError" alertType="warning" v-html="blockError"></NotificationBox>
 
-    <NotificationBox v-if="errorMessage" alertType="danger" v-html="errorMessage"></NotificationBox>
+    <NotificationBox v-if="errorMessage" ref="errorMessageElement" alertType="danger" v-html="errorMessage"></NotificationBox>
 
     <DetailBlock v-if="!blockError"
                  v-model:mode="panelMode"
@@ -11,20 +11,20 @@
                  :labels="blockLabels"
                  :headerLabels="headerLabels"
                  :entityKey="entityKey"
-                 :entityTypeGuid="entityTypeGuid"
-                 :entityTypeName="entityTypeName"
-                 :isAuditHidden="false"
-                 :isBadgesVisible="true"
+                 :isAuditHidden="isAuditHidden"
+                 :isBadgesVisible="panelMode !== DetailPanelMode.Add"
                  :isDeleteVisible="isDeleteVisible"
                  :isEditVisible="canEdit"
-                 :isFollowVisible="true"
-                 :isSecurityHidden="false"
+                 :isFollowVisible="isFollowVisible"
+                 :isSecurityHidden="panelMode === DetailPanelMode.Add"
                  :isTagsVisible="isTagListShown"
+                 :showExperienceMode="true"
                  :footerActions="footerActions"
                  :footerSecondaryActions="footerSecondaryActions"
                  @cancelEdit="onCancelEdit"
                  @delete="onDelete"
-                 @edit="onEdit">
+                 @edit="onEdit"
+                 @save="onSave">
         <template #view>
             <ViewPanel :modelValue="groupViewBag"
                        :options="options"
@@ -32,7 +32,13 @@
         </template>
 
         <template #edit>
-            <EditPanel @cancel="onCancelEdit" />
+            <EditPanel v-model="groupEditBag"
+                       :groupTypeOptions="groupTypeOptions"
+                       :allowedGroupTypes="allowedGroupTypes"
+                       :signatureDocumentTemplates="signatureDocumentTemplates"
+                       :preventSelectingInactiveCampus="preventSelectingInactiveCampus"
+                       :errorMessage="errorMessage"
+                       @propertyChanged="baseBlock.onPropertyChanged" />
         </template>
     </DetailBlock>
 
@@ -50,7 +56,7 @@
 </template>
 
 <script setup lang="ts">
-    import { computed, ref } from "vue";
+    import { computed, nextTick, ref, watch } from "vue";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
     import Modal from "@Obsidian/Controls/modal.obs";
     import { confirm, confirmDelete } from "@Obsidian/Utility/dialogs";
@@ -58,17 +64,19 @@
     import DetailBlock from "@Obsidian/Templates/detailBlock";
     import { DetailPanelMode } from "@Obsidian/Enums/Controls/detailPanelMode";
     import { PanelAction } from "@Obsidian/Types/Controls/panelAction";
-    import { onConfigurationValuesChanged, useConfigurationValues, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
+    import { onConfigurationValuesChanged, useConfigurationValues, useEntityDetailBlock, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
     import { DetailBlockBox } from "@Obsidian/ViewModels/Blocks/detailBlockBox";
     import { RelationshipStrengthDescription } from "@Obsidian/Enums/Group/relationshipStrength";
     import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
     import { GroupDetailOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailOptionsBag";
+    import { GroupTypeOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag";
     import { CopyGroupRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/copyGroupRequestBag";
+    import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
     import { ValidPropertiesBox } from "@Obsidian/ViewModels/Utility/validPropertiesBox";
     import ViewPanel from "./GroupDetail/viewPanel.partial.obs";
     import EditPanel from "./GroupDetail/editPanel.partial.obs";
     import CopyModal from "./GroupDetail/copyModal.partial.obs";
-    import { BlockActionName } from "./GroupDetail/types.partial";
+    import { BlockActionName, NavigationUrlKey } from "./GroupDetail/types.partial";
 
     const config = useConfigurationValues<DetailBlockBox<GroupBag, GroupDetailOptionsBag>>();
     const invokeBlockAction = useInvokeBlockAction();
@@ -77,11 +85,26 @@
 
     // #region Values
 
-    const blockError = ref(config.errorMessage ?? "");
+    const blockError = ref("");
     const errorMessage = ref("");
+    const errorMessageElement = ref<InstanceType<typeof NotificationBox> | null>(null);
 
-    const groupViewBag = ref<GroupBag>(config.entity ?? {} as GroupBag);
+    const groupViewBag = ref(config.entity);
+    const groupEditBag = ref<ValidPropertiesBox<GroupBag>>({
+        bag: {} as GroupBag
+    });
+
+    const groupTypeOptions = ref<GroupTypeOptionsBag>({} as GroupTypeOptionsBag);
+    const allowedGroupTypes = computed((): ListItemBag[] => config.options?.allowedGroupTypes ?? []);
+    const signatureDocumentTemplates = computed((): ListItemBag[] => config.options?.signatureDocumentTemplates ?? []);
+    const preventSelectingInactiveCampus = computed((): boolean => config.options?.preventSelectingInactiveCampus ?? false);
+
     const panelMode = ref<DetailPanelMode>(DetailPanelMode.View);
+
+    const baseBlock = useEntityDetailBlock({
+        blockConfig: config,
+        entity: groupEditBag
+    });
 
     const isCopyModalVisible = ref(false);
     const isArchiveChildPromptVisible = ref(false);
@@ -91,43 +114,42 @@
 
     // #region Computed Values
 
-    const panelName = computed((): string => groupViewBag.value?.name ?? "");
+    const panelName = computed((): string => {
+        return panelMode.value === DetailPanelMode.Add ? "Add Group" : groupViewBag.value?.name ?? "";
+    });
 
-    /**
-     * GroupType.IconCssClass surfaced as the panel title icon. Empty
-     * string falls back to no icon (DetailBlock leaves the slot empty
-     * in view mode by default).
-     */
-    const panelTitleIconCssClass = computed((): string => groupViewBag.value?.iconCssClass ?? "");
+    const panelTitleIconCssClass = computed((): string => {
+        return panelMode.value === DetailPanelMode.Add ? "" : groupViewBag.value?.iconCssClass ?? "";
+    });
 
     const entityKey = computed((): string => groupViewBag.value?.idKey ?? "");
-
-    const entityTypeGuid = computed((): string | undefined => config.entityTypeGuid ?? undefined);
-
-    const entityTypeName = computed((): string => config.entityTypeName ?? "Group");
 
     const options = computed((): GroupDetailOptionsBag => config.options ?? {} as GroupDetailOptionsBag);
 
     const canEdit = computed((): boolean => groupViewBag.value?.canEdit === true);
 
-    const isDeleteVisible = computed((): boolean => options.value.isDeleteVisible === true);
+    const isDeleteVisible = computed((): boolean => panelMode.value !== DetailPanelMode.Add && options.value.isDeleteVisible === true);
 
-    const isTagListShown = computed((): boolean => options.value.isTagListShown === true);
+    const isTagListShown = computed((): boolean => panelMode.value !== DetailPanelMode.Add && options.value.isTagListShown === true);
+
+    const isAuditHidden = computed((): boolean => panelMode.value === DetailPanelMode.Add);
+
+    const isFollowVisible = computed((): boolean => panelMode.value !== DetailPanelMode.Add);
 
     /**
      * Labels rendered in the panel sub-header. Phase 1 surfaces the
      * lifecycle / context labels (Archived, Inactive, Relationship
      * Strength, Public). The GroupType and Campus chips are split off
-     * into <c>headerLabels</c> so they render next to the panel title
-     * per the figma.
+     * into headerLabels so they render next to the panel title per
+     * the figma. Hidden in Add mode.
      */
     const blockLabels = computed((): PanelAction[] => {
-        if (panelMode.value !== DetailPanelMode.View) {
+        const bag = groupViewBag.value;
+        if (!bag || panelMode.value !== DetailPanelMode.View) {
             return [];
         }
 
         const labels: PanelAction[] = [];
-        const bag = groupViewBag.value;
 
         if (bag.isArchived) {
             labels.push({ title: "Archived", type: "warning" });
@@ -154,15 +176,15 @@
     /**
      * Labels rendered next to the panel title (header). GroupType is
      * tinted by GroupType.GroupTypeColor when set; Campus uses Rock's
-     * .label-campus outlined style.
+     * .label-campus outlined style. Hidden in Add mode.
      */
     const headerLabels = computed((): PanelAction[] => {
-        if (panelMode.value !== DetailPanelMode.View) {
+        const bag = groupViewBag.value;
+        if (!bag || panelMode.value !== DetailPanelMode.View) {
             return [];
         }
 
         const labels: PanelAction[] = [];
-        const bag = groupViewBag.value;
 
         if (bag.groupType?.name) {
             const groupTypeUrl = bag.groupType.url;
@@ -232,17 +254,15 @@
 
     // #region Functions
 
+    /**
+     * Shows the Copy Group modal so the user can pick a copy target.
+     */
     function openCopyModal(): void {
         isCopyModalVisible.value = true;
     }
 
     /**
      * Opens the archive-children prompt and awaits the user's choice.
-     * Resolves with the block-action name to invoke:
-     * `BlockActionName.ArchiveWithChildren` for Yes,
-     * `BlockActionName.Archive` for No (or the modal close button,
-     * which the original WebForms flow also treated as
-     * archive-parent-only).
      */
     function showArchiveChildPrompt(): Promise<BlockActionName.Archive | BlockActionName.ArchiveWithChildren | false> {
         return new Promise(resolve => {
@@ -251,33 +271,123 @@
         });
     }
 
+    /**
+     * Reactively fetches GroupTypeOptionsBag whenever the edit bag's
+     * groupTypeId changes (Q2 Approach B). Covers initial Edit (onEdit
+     * assigns the bag), Add-mode group-type pick (EditPanel updates the
+     * bag via v-model), and mid-edit group-type swap.
+     */
+    watch(() => groupEditBag.value.bag?.groupTypeId, async (newId) => {
+        if (!newId || newId <= 0) {
+            groupTypeOptions.value = {} as GroupTypeOptionsBag;
+            return;
+        }
+
+        const result = await invokeBlockAction<GroupTypeOptionsBag>("GetGroupTypeOptions", { groupTypeId: newId });
+        if (result.isSuccess && result.data) {
+            groupTypeOptions.value = result.data;
+        }
+        else {
+            errorMessage.value = result.errorMessage ?? "Unable to fetch options for this Group Type.";
+            scrollToErrorNotification();
+        }
+    });
+
+    /**
+    * Smoothly scrolls the error NotificationBox into view after the DOM
+    * has had a chance to render it. Used by every server-error path so
+    * the user sees the message even if they were scrolled mid-form.
+    */
+    function scrollToErrorNotification(): void {
+        nextTick(() => {
+            if (errorMessageElement.value?.$el) {
+                errorMessageElement.value.$el.scrollIntoView({
+                    behavior: "smooth",
+                    block: "nearest",
+                });
+            }
+        });
+    }
+
     // #endregion
 
     // #region Event Handlers
 
     /**
-     * Cancel from edit mode returns to view mode (no block action call;
-     * mirrors the WebForms btnCancel_Click behavior at GroupDetail.ascx.cs:1496-1499).
+     * Cancel from edit mode. ?returnUrl= takes precedence (WebForms parity
+     * at GroupDetail.ascx.cs:1460-1463 — unconditional, no autoEdit gate;
+     * the framework's onCancelEdit handler at detailBlock.ts:630-638 only
+     * honors returnUrl when ?autoEdit=true is also set, so the block has
+     * to echo it for non-autoEdit Cancel flows). Otherwise: existing
+     * group → return to view mode; Add mode → redirect to GroupListPage
+     * if configured, else stay put.
      */
     async function onCancelEdit(): Promise<boolean | string> {
+        const returnUrl = new URLSearchParams(window.location.search).get("returnUrl");
+        if (returnUrl) {
+            return returnUrl;
+        }
+
+        if (!groupEditBag.value.bag?.idKey) {
+            if (config.navigationUrls?.[NavigationUrlKey.GroupListPage]) {
+                return config.navigationUrls[NavigationUrlKey.GroupListPage];
+            }
+
+            return false;
+        }
+
         return true;
     }
 
     /**
-     * Edit click. Phase 1 invokes the placeholder Edit block action and
-     * switches the panel into edit mode where the EditPanel renders the
-     * "Phase 2" stub.
+     * Edit click. Calls the C# Edit block action and assigns the bag.
+     * The watcher on groupEditBag.bag.groupTypeId then reactively
+     * fetches GroupTypeOptionsBag.
      */
     async function onEdit(): Promise<boolean> {
         const result = await invokeBlockAction<ValidPropertiesBox<GroupBag>>(BlockActionName.Edit, {
             key: groupViewBag.value?.idKey
         });
 
-        if (result.isSuccess) {
+        if (result.isSuccess && result.data && result.data.bag) {
+            groupEditBag.value = {
+                bag: result.data.bag,
+                validProperties: result.data.validProperties ?? Object.keys(result.data.bag)
+            };
+
             return true;
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to enter edit mode.";
+        scrollToErrorNotification();
+        return false;
+    }
+
+    /**
+     * Save click. Calls the C# Save block action. On 200 (Update) the
+     * response is a refreshed ValidPropertiesBox<GroupBag>; we copy its
+     * bag into groupViewBag so the View panel reflects new values. On
+     * 201 (Create) the response is a redirect URL string; we navigate.
+     */
+    async function onSave(): Promise<boolean | string> {
+        errorMessage.value = "";
+
+        const result = await invokeBlockAction<ValidPropertiesBox<GroupBag> | string>(BlockActionName.Save, {
+            box: groupEditBag.value
+        });
+
+        if (result.isSuccess && result.data) {
+            if (result.statusCode === 200 && typeof result.data === "object") {
+                groupViewBag.value = result.data.bag;
+                return true;
+            }
+            else if (result.statusCode === 201 && typeof result.data === "string") {
+                return result.data;
+            }
+        }
+
+        errorMessage.value = result.errorMessage ?? "Unknown error while trying to save group.";
+        scrollToErrorNotification();
         return false;
     }
 
@@ -302,16 +412,15 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to delete the group.";
+        scrollToErrorNotification();
         return false;
     }
 
     /**
      * Archive click. Confirms, then if the bag indicates child groups
      * exist, opens the child-archive prompt and routes to either
-     * <c>Archive</c> (No) or <c>ArchiveWithChildren</c> (Yes). When no
-     * children exist, calls <c>Archive</c> directly. Single round-trip
-     * in both branches; the prompt-or-not decision is made client-side
-     * from the bag's <c>hasChildGroups</c> flag.
+     * Archive (No) or ArchiveWithChildren (Yes). When no children
+     * exist, calls Archive directly.
      */
     async function onArchiveClick(): Promise<void> {
         errorMessage.value = "";
@@ -339,6 +448,7 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to archive the group.";
+        scrollToErrorNotification();
     }
 
     /** "Yes" from the archive-children prompt: cascade to descendants. */
@@ -362,10 +472,9 @@
     }
 
     /**
-     * Save from the Copy modal. Calls <c>Copy</c> and follows the redirect
-     * URL it returns (which always points at the new group; per
-     * 18-cross-block-dependencies.md the Copy flow does NOT honor
-     * returnUrl).
+     * Save from the Copy modal. Calls Copy and follows the redirect
+     * URL it returns (always points at the new group; Copy does NOT
+     * honor returnUrl).
      */
     async function onCopySave(bag: CopyGroupRequestBag): Promise<void> {
         errorMessage.value = "";
@@ -385,9 +494,22 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to copy the group.";
+        scrollToErrorNotification();
     }
 
     // #endregion
+
+    // Handle any initial error conditions or the need to enter Add mode.
+    if (config.errorMessage) {
+        blockError.value = config.errorMessage;
+    }
+    else if (!config.entity) {
+        blockError.value = "The specified group could not be viewed.";
+    }
+    else if (!config.entity.idKey) {
+        groupEditBag.value = { bag: config.entity };
+        panelMode.value = DetailPanelMode.Add;
+    }
 
     // Register the group in the user's "Groups" Quick Return menu when
     // viewing an existing group. Skip in Add mode (no entity yet).

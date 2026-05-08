@@ -22,23 +22,34 @@
 //
 
 /**
- * Reference to a group administrator surfaced in the Overview card.
- * Carries the administrator's friendly name and a server-resolved
- * link URL. The URL prefers the Person EntityType.LinkUrlLavaTemplate
- * (so customer-customized link rules are honored) and falls back to
- * /Person/{IdKey}.
+ * Reference to a group administrator. Inherited Value carries
+ * the PersonAlias Guid (as a string) and Text carries the
+ * administrator's friendly name; the picker-shaped base lets the
+ * edit-mode &lt;PersonPicker&gt; bind to the same field. The
+ * view-mode Overview card additionally renders a link using the
+ * pre-resolved Url, which prefers the Person
+ * EntityType.LinkUrlLavaTemplate (so customer-customized
+ * link rules are honored) and falls back to /Person/{IdKey}.
  */
 export type GroupAdministratorBag = {
-    /**
-     * Gets or sets the administrator's friendly name (e.g.,
-     * "Alisha Marble"). Rendered as the link text.
-     */
-    name?: string | null;
+    /** Gets or sets the category for this item. */
+    category?: string | null;
+
+    /** Gets or sets disabled for this item. */
+    disabled?: boolean | null;
+
+    /** Gets or sets the text. */
+    text?: string | null;
 
     /**
      * Gets or sets the pre-resolved profile URL. Null / empty when
-     * no link can be constructed; the Vue layer falls through to
-     * rendering the name as plain text.
+     * no link can be constructed (also during edit-mode emits, where
+     * the picker overwrites Value/Text without a URL);
+     * the Vue layer falls through to rendering the name as plain
+     * text in either case.
      */
     url?: string | null;
+
+    /** Gets or sets the value. */
+    value?: string | null;
 };

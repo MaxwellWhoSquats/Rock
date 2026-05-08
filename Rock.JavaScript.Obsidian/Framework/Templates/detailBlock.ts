@@ -83,11 +83,11 @@ export default defineComponent({
         /**
          * Icon CSS class shown before the panel title in view mode. Edit /
          * Add modes still use their built-in pencil / plus icons. Optional;
-         * leaving it unset falls back to no view-mode icon, matching the
-         * historical behavior.
+         * leaving it unset (or passing null / undefined) falls back to no
+         * view-mode icon, matching the historical behavior.
          */
         titleIconCssClass: {
-            type: String as PropType<string>,
+            type: String as PropType<string | null>,
             required: false
         },
 

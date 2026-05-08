@@ -21,34 +21,70 @@
 // </copyright>
 //
 
+import { ChatNotificationMode } from "@Obsidian/Enums/Communication/Chat/chatNotificationMode";
+import { AttendanceRecordRequiredForCheckIn } from "@Obsidian/Enums/Group/attendanceRecordRequiredForCheckIn";
 import { RelationshipStrength } from "@Obsidian/Enums/Group/relationshipStrength";
+import { ScheduleConfirmationLogic } from "@Obsidian/Enums/Group/scheduleConfirmationLogic";
+import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
+import { ScheduleType } from "@Obsidian/Enums/Group/scheduleType";
+import { ElevatedSecurityLevel } from "@Obsidian/Enums/Security/elevatedSecurityLevel";
+import { Guid } from "@Obsidian/Types";
 import { GroupAdministratorBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupAdministratorBag";
 import { GroupDetailGroupTypeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailGroupTypeBag";
 import { GroupLinkagesBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLinkagesBag";
 import { GroupMeetingLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMeetingLocationBag";
 import { ParentGroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/parentGroupBag";
+import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 import { PublicAttributeBag } from "@Obsidian/ViewModels/Utility/publicAttributeBag";
 
 /**
  * The bag returned by the Group Detail block. Phase 1 ships the
- * view-mode fields. Phase 2 extends this bag with edit-mode scalar
- * fields, GroupType cascade options, peer-network overrides, RSVP /
- * Scheduling / Chat sections, and the new Group.PhotoId-driven
- * uploader fields.
+ * view-mode fields, Phase 2 added the photo URL + view-mode
+ * notifications + meeting-locations payload, Phase 3 extends with
+ * edit-mode scalar fields covering Section 1 (Top fields), Section 2
+ * (General — Overview / Admin &amp; Security / Relationships stacks),
+ * Section 3 (RSVP), Section 4 Stacks 1 and 3 (Inline Schedule and
+ * Member Scheduling), and Section 8 (Chat). Sub-feature payloads
+ * (Attributes / Requirements / Sync / Triggers / Locations editing)
+ * land in Phases 4-6.
  */
 export type GroupBag = {
     /**
-     * Gets or sets the group administrator reference. Null when no
-     * administrator is set or when GroupType.ShowAdministrator
-     * is false; the row is hidden in either case.
+     * Gets or sets the group administrator reference. Inherits
+     * Value (PersonAlias Guid) and Text (friendly name)
+     * from ListItemBag; adds a server-resolved profile
+     * Url for the view-mode link. Bound to
+     * &lt;PersonPicker&gt; in edit mode (the picker reads
+     * only Value and Text; Url is repopulated
+     * on the next view-mode load). Null when no administrator is
+     * set or when GroupType.ShowAdministrator is false.
      */
     administrator?: GroupAdministratorBag | null;
+
+    /**
+     * Gets or sets the attendance-record-required-for-check-in
+     * behavior. Visible only when
+     * GroupType.TakesAttendance. Persisted to
+     * Group.AttendanceRecordRequiredForCheckIn.
+     */
+    attendanceRecordRequiredForCheckIn: AttendanceRecordRequiredForCheckIn;
 
     /** Gets or sets the attributes. */
     attributes?: Record<string, PublicAttributeBag> | null;
 
     /** Gets or sets the attribute values. */
     attributeValues?: Record<string, string> | null;
+
+    /**
+     * Gets or sets the campus selected on the General section's
+     * Campus picker. ListItemBag.value is the campus Id (as
+     * a string); ListItemBag.text is the campus name. Null
+     * when no campus is selected. Resolved server-side to
+     * Group.CampusId. Honors PreventSelectingInactiveCampus
+     * block attribute. Distinct from Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.CampusName, the
+     * header-chrome scalar.
+     */
+    campus?: ListItemBag | null;
 
     /**
      * Gets or sets the campus name. Null when the group has no campus
@@ -70,16 +106,67 @@ export type GroupBag = {
     canEdit: boolean;
 
     /**
+     * Gets or sets the BinaryFile reference for the chat-channel
+     * avatar. The ListItemBag.value is the BinaryFile Guid;
+     * the ListItemBag.text is the file name. Bound to the
+     * &lt;ImageUploader&gt; in Section 8. Null when no avatar
+     * is set. Save logic toggles BinaryFile.IsTemporary per
+     * the chat-avatar pattern at webforms/14-chat.md.
+     */
+    chatChannelAvatarBinaryFile?: ListItemBag | null;
+
+    /**
+     * Gets or sets the chat push-notification-mode override (null =
+     * inherit). Persisted to
+     * Group.ChatPushNotificationModeOverride.
+     */
+    chatPushNotificationModeOverride?: ChatNotificationMode | null;
+
+    /**
      * Gets or sets the group's description text rendered below the
      * image in the Overview card.
      */
     description?: string | null;
 
     /**
+     * Gets or sets a value indicating whether the group is hidden
+     * from the Schedule Toolbox. Persisted to
+     * Group.DisableScheduleToolboxAccess.
+     */
+    disableScheduleToolboxAccess: boolean;
+
+    /**
+     * Gets or sets a value indicating whether group-member scheduling
+     * is disabled at the group level. Persisted to
+     * Group.DisableScheduling.
+     */
+    disableScheduling: boolean;
+
+    /**
+     * Gets or sets the elevated-security level applied when the
+     * group is acting as a security role. Visible only when
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.IsSecurityRole is true.
+     */
+    elevatedSecurityLevel: ElevatedSecurityLevel;
+
+    /**
      * Gets or sets the group's capacity. Null when not configured,
-     * which hides the row.
+     * which hides the row in the view panel and keeps the input
+     * blank in edit mode.
      */
     groupCapacity?: number | null;
+
+    /**
+     * Gets or sets the Member Record Source selected on the
+     * dropdown. ListItemBag.value is the DefinedValue Id (as
+     * a string); ListItemBag.text is the value's display
+     * name. Source: the RECORD_SOURCE_TYPE defined type.
+     * Resolved server-side to
+     * Group.GroupMemberRecordSourceValueId only when
+     * GroupType.AllowGroupSpecificRecordSource is true; the
+     * save flow nulls this otherwise.
+     */
+    groupMemberRecordSource?: ListItemBag | null;
 
     /**
      * Gets or sets the group type reference rendered as a chip in
@@ -91,6 +178,15 @@ export type GroupBag = {
     groupType?: GroupDetailGroupTypeBag | null;
 
     /**
+     * Gets or sets the GroupType Id for the active edit session.
+     * Required on Add; read-only on existing groups (the WebForms
+     * block surfaces a label instead of the dropdown). Drives the
+     * reactive cascade via the GetGroupTypeOptions block
+     * action.
+     */
+    groupTypeId?: number | null;
+
+    /**
      * Gets or sets a value indicating whether the group has any child
      * groups. Drives whether the Vue layer prompts the user to choose
      * between archiving the group alone or cascading the archive to
@@ -98,6 +194,13 @@ export type GroupBag = {
      * children check at GroupDetail.ascx.cs:641.
      */
     hasChildGroups: boolean;
+
+    /**
+     * Gets or sets the iCalendar content emitted by the Schedule
+     * Builder when Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.ScheduleType is Custom.
+     * Persisted to Schedule.iCalendarContent.
+     */
+    iCalendarContent?: string | null;
 
     /**
      * Gets or sets the icon CSS class sourced from the group type
@@ -108,7 +211,33 @@ export type GroupBag = {
     /** Gets or sets the identifier key of this entity. */
     idKey?: string | null;
 
-    /** Gets or sets a value indicating whether the group is active. */
+    /**
+     * Gets or sets a value indicating whether to cascade the inactive
+     * flag to all active descendant groups on save. UI-only flag (not
+     * persisted on the Group entity). When true and IsActive is being
+     * flipped to false, the save flow walks descendants and updates
+     * each.
+     */
+    inactivateChildGroups: boolean;
+
+    /**
+     * Gets or sets the free-text inactive note. Persisted to
+     * Group.InactiveReasonNote.
+     */
+    inactiveReasonNote?: string | null;
+
+    /**
+     * Gets or sets the inactive-reason DefinedValue Id assigned when
+     * the group is inactive. Null when the group is active or no
+     * reason was chosen. Persisted to Group.InactiveReasonValueId.
+     */
+    inactiveReasonValueId?: number | null;
+
+    /**
+     * Gets or sets a value indicating whether the group is active.
+     * Editable from the General section (drives the Inactive
+     * conditional well).
+     */
     isActive: boolean;
 
     /**
@@ -118,16 +247,84 @@ export type GroupBag = {
     isArchived: boolean;
 
     /**
+     * Gets or sets the always-show override (null = inherit).
+     * Persisted to Group.IsChatChannelAlwaysShownOverride.
+     */
+    isChatChannelAlwaysShownOverride?: boolean | null;
+
+    /**
+     * Gets or sets the public-channel override (null = inherit).
+     * Persisted to Group.IsChatChannelPublicOverride.
+     */
+    isChatChannelPublicOverride?: boolean | null;
+
+    /**
+     * Gets or sets the chat-enabled override (null = inherit, true
+     * = yes, false = no). Persisted to
+     * Group.IsChatEnabledOverride.
+     */
+    isChatEnabledOverride?: boolean | null;
+
+    /**
+     * Gets or sets a value indicating whether the current user is a
+     * member of the GROUP_ADMINISTRATORS system group. Drives the
+     * visibility of the "Enable as Security Role" checkbox in
+     * Section 2 Stack 2 per WebForms parity.
+     */
+    isCurrentPersonGroupAdministrator: boolean;
+
+    /**
+     * Gets or sets the leaving-chat-channel-allowed override (null =
+     * inherit). Persisted to
+     * Group.IsLeavingChatChannelAllowedOverride.
+     */
+    isLeavingChatChannelAllowedOverride?: boolean | null;
+
+    /**
+     * Gets or sets a value indicating whether the
+     * LimittoSecurityRoleGroups block attribute is enabled,
+     * surfaced so the edit panel can disable / force-check the
+     * "Enable as Security Role" checkbox per WebForms parity.
+     */
+    isLimitedToSecurityRoleGroups: boolean;
+
+    /**
      * Gets or sets a value indicating whether the group is publicly
-     * visible. Drives the Public chip in the subheader.
+     * visible. Drives the Public chip in the subheader and
+     * is editable from the General section ("Show Publicly").
      */
     isPublic: boolean;
 
     /**
+     * Gets or sets a value indicating whether the group is enabled
+     * as a security role. Visible only to GROUP_ADMINISTRATORS
+     * members per WebForms parity. Forced to true when
+     * LimittoSecurityRoleGroups block attribute is enabled.
+     */
+    isSecurityRole: boolean;
+
+    /**
      * Gets or sets a value indicating whether the group is a system
-     * group. System groups suppress Edit / Delete / Archive.
+     * group. System groups suppress Edit / Delete / Archive and
+     * disable the chat-channel-avatar uploader.
      */
     isSystem: boolean;
+
+    /**
+     * Gets or sets the leader-to-leader relationship multiplier
+     * override (0-1 decimal). Null = inherit from group type's
+     * LeaderToLeaderRelationshipMultiplier. Persisted to
+     * Group.LeaderToLeaderRelationshipMultiplierOverride.
+     */
+    leaderToLeaderRelationshipMultiplierOverride?: number | null;
+
+    /**
+     * Gets or sets the leader-to-non-leader relationship multiplier
+     * override (0-1 decimal). Null = inherit from group type.
+     * Persisted to
+     * Group.LeaderToNonLeaderRelationshipMultiplierOverride.
+     */
+    leaderToNonLeaderRelationshipMultiplierOverride?: number | null;
 
     /**
      * Gets or sets the linkages section content (registrations, event
@@ -140,7 +337,7 @@ export type GroupBag = {
      * Gets or sets the per-GroupLocation meeting location
      * cards rendered on the right rail of the View panel. Always
      * emitted; the Vue layer uses a v-if on
-     * length > 0 to omit the entire card when the group
+     * length &gt; 0 to omit the entire card when the group
      * has no locations. Each entry renders as one 16:9 map card with
      * optional address and schedule below.
      */
@@ -150,10 +347,57 @@ export type GroupBag = {
     name?: string | null;
 
     /**
-     * Gets or sets the parent group reference. Null when the group
-     * has no parent; the row is hidden in that case.
+     * Gets or sets the named Schedule selected when
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.ScheduleType is Named.
+     * ListItemBag.value is the Schedule Id (as a string);
+     * ListItemBag.text is the schedule's name. Null
+     * otherwise. Resolved server-side to Group.ScheduleId.
+     */
+    namedSchedule?: ListItemBag | null;
+
+    /**
+     * Gets or sets the non-leader-to-leader relationship multiplier
+     * override (0-1 decimal). Null = inherit from group type.
+     * Persisted to
+     * Group.NonLeaderToLeaderRelationshipMultiplierOverride.
+     */
+    nonLeaderToLeaderRelationshipMultiplierOverride?: number | null;
+
+    /**
+     * Gets or sets the non-leader-to-non-leader relationship
+     * multiplier override (0-1 decimal). Null = inherit from group
+     * type. Persisted to
+     * Group.NonLeaderToNonLeaderRelationshipMultiplierOverride.
+     */
+    nonLeaderToNonLeaderRelationshipMultiplierOverride?: number | null;
+
+    /**
+     * Gets or sets a value indicating whether the user has chosen to
+     * override the group type's peer-network settings. UI-only flag;
+     * when false, the save flow nulls every override field below
+     * regardless of UI value.
+     */
+    overrideRelationshipStrength: boolean;
+
+    /**
+     * Gets or sets the parent group reference. Inherits Value
+     * (parent group Id as a string) and Text (friendly name)
+     * from ListItemBag; adds a server-resolved detail
+     * Url for the view-mode link. Bound to
+     * &lt;GroupPicker&gt; in edit mode. Null when the group
+     * has no parent.
      */
     parentGroup?: ParentGroupBag | null;
+
+    /**
+     * Gets or sets the BinaryFile reference for the Group hero image.
+     * The ListItemBag.value is the BinaryFile Guid; the
+     * ListItemBag.text is the file name. Bound to the
+     * &lt;ImageUploader&gt; in Section 1. Null when the group
+     * has no photo set. Save logic toggles BinaryFile.IsTemporary
+     * to mirror the chat-channel-avatar pattern.
+     */
+    photoBinaryFile?: ListItemBag | null;
 
     /**
      * Gets or sets the URL of the 16:9 hero image at the top of the
@@ -161,8 +405,16 @@ export type GroupBag = {
      * resolves Group.PhotoId through FileUrlHelper).
      * Null when the group has no photo set; the Vue layer omits the
      * hero region entirely in that case (no placeholder, per design).
+     * View-mode only.
      */
     photoUrl?: string | null;
+
+    /**
+     * Gets or sets the relationship-growth-enabled override. Null =
+     * inherit from group type. Persisted to
+     * Group.RelationshipGrowthEnabledOverride.
+     */
+    relationshipGrowthEnabledOverride?: boolean | null;
 
     /**
      * Gets or sets the effective relationship strength for the
@@ -177,15 +429,74 @@ export type GroupBag = {
     relationshipStrength?: RelationshipStrength | null;
 
     /**
+     * Gets or sets the relationship-strength override (Casual / Close
+     * / Deep per the design rename map). Underlying enum integers are
+     * unchanged. Null = inherit from group type. Persisted to
+     * Group.RelationshipStrengthOverride.
+     */
+    relationshipStrengthOverride?: RelationshipStrength | null;
+
+    /**
+     * Gets or sets the Required Signature Document Template Id
+     * selected on the dropdown. Source list:
+     * SignatureDocumentTemplateService.GetLegacyTemplates()
+     * per webforms/05. Null clears the requirement. Persisted to
+     * Group.RequiredSignatureDocumentTemplateId.
+     */
+    requiredSignatureDocumentTemplateId?: number | null;
+
+    /**
      * Gets or sets the role-limit warning HTML rendered in the view
      * panel's top notification surface when one or more
-     * GroupTypeRoles violate their MinCount / MaxCount against the
-     * group's current active member counts. Null / empty hides the
-     * notification. Populated from
-     * Group.GetGroupTypeRoleLimitWarnings(out string); mirrors the
-     * WebForms nbRoleLimitWarning at GroupDetail.ascx.cs:1849-1851.
+     * GroupTypeRoles violate their MinCount /
+     * MaxCount against the group's current active member
+     * counts. Null / empty hides the notification. Populated from
+     * Group.GetGroupTypeRoleLimitWarnings(out string);
+     * mirrors the WebForms nbRoleLimitWarning at
+     * GroupDetail.ascx.cs:1849-1851.
      */
     roleLimitWarning?: string | null;
+
+    /**
+     * Gets or sets the RSVP reminder offset days override. Null =
+     * inherit from group type's pinned value (read-only when the
+     * group type pins it). Persisted to
+     * Group.RSVPReminderOffsetDays.
+     */
+    rsvpReminderOffsetDays?: number | null;
+
+    /**
+     * Gets or sets the RSVP reminder system communication Guid
+     * override. Null = inherit from group type's pinned value
+     * (read-only when the group type pins it). Resolved server-side
+     * to Group.RSVPReminderSystemCommunicationId.
+     */
+    rsvpReminderSystemCommunicationGuid?: Guid | null;
+
+    /**
+     * Gets or sets the schedule confirmation logic (Ask /
+     * AutoAccept). Null = inherit. Persisted to
+     * Group.ScheduleConfirmationLogic.
+     */
+    scheduleConfirmationLogic?: ScheduleConfirmationLogic | null;
+
+    /**
+     * Gets or sets the bitmask of coordinator notification types
+     * (Accept / Decline / SelfSchedule). Per Q11, an empty selection
+     * (zero flags set) means
+     * Rock.Model.ScheduleCoordinatorNotificationType.None.
+     * Persisted to Group.ScheduleCoordinatorNotificationTypes.
+     */
+    scheduleCoordinatorNotificationTypes: ScheduleCoordinatorNotificationType;
+
+    /**
+     * Gets or sets the schedule coordinator selected on the
+     * &lt;PersonPicker&gt;. ListItemBag.value is the
+     * PersonAlias Guid; ListItemBag.text is the person's
+     * friendly name. Null clears the coordinator. Resolved
+     * server-side to Group.ScheduleCoordinatorPersonAliasId.
+     */
+    scheduleCoordinatorPerson?: ListItemBag | null;
 
     /**
      * Gets or sets the friendly schedule text for the group's primary
@@ -193,4 +504,42 @@ export type GroupBag = {
      * group has no schedule, which hides the row.
      */
     scheduleFriendlyText?: string | null;
+
+    /**
+     * Gets or sets the schedule type radio selection (None /
+     * Weekly / Custom / Named). Drives which sub-fields render and
+     * the inline-schedule lifecycle on save.
+     */
+    scheduleType: ScheduleType;
+
+    /**
+     * Gets or sets a value indicating whether members must meet
+     * requirements to be schedulable. Persisted to
+     * Group.SchedulingMustMeetRequirements.
+     */
+    schedulingMustMeetRequirements: boolean;
+
+    /**
+     * Gets or sets the Status DefinedValue Id selected on the
+     * General section's Status dropdown. Source list comes from
+     * GroupTypeOptionsBag.StatusValues. Null = no status.
+     * Persisted to Group.StatusValueId.
+     */
+    statusValueId?: number | null;
+
+    /**
+     * Gets or sets the day-of-week selected when
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.ScheduleType is Weekly. Null otherwise.
+     * Persisted to Schedule.WeeklyDayOfWeek on the inline
+     * schedule.
+     */
+    weeklyDayOfWeek?: number | null;
+
+    /**
+     * Gets or sets the time-of-day selected when
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.ScheduleType is Weekly. Serialized as
+     * the standard ISO-8601 time string ("HH:mm:ss"). Persisted to
+     * Schedule.WeeklyTimeOfDay.
+     */
+    weeklyTimeOfDay?: string | null;
 };

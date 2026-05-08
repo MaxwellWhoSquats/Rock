@@ -22,6 +22,7 @@ using System.Data.Entity;
 using System.Linq;
 
 using Rock.Attribute;
+using Rock.Communication.Chat;
 using Rock.Constants;
 using Rock.Data;
 using Rock.Model;
@@ -38,10 +39,17 @@ using RelationshipStrength = Rock.Enums.Group.RelationshipStrength;
 namespace Rock.Blocks.Group
 {
     /// <summary>
-    /// Displays the details of a particular group. Phase 1 ships the block
-    /// shell, the redesigned pure-Vue view panel, the Audit Details modal,
-    /// and the terminal actions (Delete, Archive, ArchiveWithChildren,
-    /// Copy). Edit mode is a Phase 2 placeholder.
+    /// Displays the details of a particular group. Phase 1 shipped the
+    /// block shell, the redesigned pure-Vue view panel, the Audit Details
+    /// modal, and the terminal actions (Delete, Archive, ArchiveWithChildren,
+    /// Copy). Phase 2 closed the view-panel gaps (Group Image hero +
+    /// Meeting Locations card). Phase 3 ships the edit panel core (Top
+    /// fields + General + RSVP + Scheduling + Chat sections), the Save
+    /// block action, the GroupType reactive cascade
+    /// (<c>GetGroupTypeOptions</c>) per Q2 Approach B, the photo and
+    /// chat-channel-avatar uploaders, the Add path with
+    /// <c>?ParentGroupId=N</c> defaulting, and <c>?autoEdit=true</c>
+    /// handling.
     /// </summary>
     [DisplayName( "Group Detail" )]
     [Category( "Groups" )]
@@ -289,6 +297,19 @@ namespace Rock.Blocks.Group
 
         #endregion Keys
 
+        #region Fields
+
+        /// <summary>
+        /// Per-request memo for the active <see cref="GroupTypeCache"/>.
+        /// Resolved lazily by <see cref="GetGroupTypeCache(Model.Group)"/>
+        /// and self-invalidated when the entity's <c>GroupTypeId</c>
+        /// changes mid-request (e.g., during <c>UpdateEntityFromBox</c>'s
+        /// GroupTypeId reassignment).
+        /// </summary>
+        private GroupTypeCache _cachedGroupType;
+
+        #endregion Fields
+
         #region Methods
 
         /// <inheritdoc/>
@@ -308,7 +329,11 @@ namespace Rock.Blocks.Group
         /// <inheritdoc/>
         protected override Model.Group GetInitialEntity()
         {
-            return GetInitialEntity<Model.Group, GroupService>( RockContext, PageParameterKey.GroupId );
+            var entity = GetInitialEntity<Model.Group, GroupService>( RockContext, PageParameterKey.GroupId );
+
+            ApplyNewGroupDefaultValues( entity );
+
+            return entity;
         }
 
         /// <summary>
@@ -342,9 +367,7 @@ namespace Rock.Blocks.Group
             }
             else
             {
-                // Phase 1 only ships view mode for existing groups. Add via
-                // the URL-with-GroupId-zero path is Phase 2 scope; the
-                // placeholder edit panel renders an explanatory message.
+                // New entity is being created, prepare for edit mode by default.
                 if ( box.IsEditable )
                 {
                     box.Entity = GetEntityBagForEdit( entity );
@@ -368,7 +391,12 @@ namespace Rock.Blocks.Group
         /// </summary>
         private GroupDetailOptionsBag GetBoxOptions( Model.Group entity, Dictionary<string, string> navigationUrls )
         {
-            var options = new GroupDetailOptionsBag();
+            var options = new GroupDetailOptionsBag
+            {
+                PreventSelectingInactiveCampus = GetAttributeValue( AttributeKey.PreventSelectingInactiveCampus ).AsBoolean(),
+                AllowedGroupTypes = BuildAllowedGroupTypeListItems( entity ),
+                SignatureDocumentTemplates = BuildSignatureDocumentTemplateListItems( entity )
+            };
 
             var groupType = GetGroupTypeCache( entity );
 
@@ -394,6 +422,20 @@ namespace Rock.Blocks.Group
             var canEdit = entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson );
             options.IsCopyButtonShown = GetAttributeValue( AttributeKey.ShowCopyButton ).AsBoolean() && canEdit;
 
+            /*
+                5/9/2026 - CLAUDE
+
+                Two separate EXISTS queries against GroupHistorical and
+                GroupMemberHistorical. Mirrors the WebForms check at
+                GroupDetail.ascx.cs:2582-2583 verbatim. Combining into a
+                single query (UNION ALL with a TOP 1) doesn't yield a
+                cleaner shape in EF and the EnableGroupHistory short-
+                circuit already prevents the queries from running on
+                groups whose group type has history disabled.
+
+                Reason: matches WebForms parity; the two-query shape is
+                acceptable given the EnableGroupHistory short-circuit.
+            */
             var hasHistory = groupType.EnableGroupHistory
                 && (
                     new GroupHistoricalService( RockContext ).Queryable().Any( a => a.GroupId == entity.Id )
@@ -414,9 +456,29 @@ namespace Rock.Blocks.Group
 
         /// <summary>
         /// Builds the read-only / view-mode bag fields that are common
-        /// across both view and edit modes for Phase 1. Phase 2 extends
-        /// this method with edit-mode scalar fields.
+        /// across both view and edit modes. Edit mode extends in
+        /// <see cref="GetEntityBagForEdit(Model.Group)"/>; view mode
+        /// extends in <see cref="GetEntityBagForView(Model.Group)"/>.
         /// </summary>
+        /// <remarks>
+        /// 5/9/2026 - CLAUDE
+        ///
+        /// Several navigation accesses in this method
+        /// (<c>entity.Schedule</c>, <c>entity.GroupAdministratorPersonAlias.Person</c>,
+        /// <c>entity.ParentGroup</c>, <c>entity.Photo</c>) trigger lazy
+        /// loads — one round-trip each. WebForms <c>GetGroup</c> at
+        /// GroupDetail.ascx.cs:2913 follows the same lazy-load pattern,
+        /// so this is intentional parity and not a bug. The block's
+        /// page-load path does ~5-6 SQL round-trips per view render.
+        ///
+        /// A future optimization is to override <c>GetInitialEntity</c>
+        /// (or query directly with explicit <c>.Include(...)</c> calls)
+        /// to collapse these into a single round-trip. Deferred — touch
+        /// when Phase 5 / 6 work is already in this neighborhood.
+        ///
+        /// Reason: lazy-load matches WebForms parity; eager-load is a
+        /// future optimization opportunity.
+        /// </remarks>
         private GroupBag GetCommonEntityBag( Model.Group entity )
         {
             if ( entity == null )
@@ -433,6 +495,38 @@ namespace Rock.Blocks.Group
             var canEdit = entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson );
             var canAdministrate = entity.IsAuthorized( Authorization.ADMINISTRATE, RequestContext.CurrentPerson );
 
+            /*
+                5/9/2026 - CLAUDE
+
+                The bag's HasChildGroups field is used by the Vue layer
+                in two places with subtly different semantic needs:
+                  1. Archive cascade prompt (groupDetail.obs) — needs
+                     "any descendant exists, regardless of state".
+                  2. Inactivate-children checkbox visibility
+                     (editPanel.partial.obs) — needs "any ACTIVE
+                     descendant exists" (matching the cascade's own
+                     `GetAllDescendentGroupIds(includeInactive: false)`
+                     filter).
+
+                The WebForms block uses two distinct queries: an
+                immediate-children-any-state check at
+                GroupDetail.ascx.cs:641 (Archive prompt) and a recursive
+                active-descendants check at GroupDetail.ascx.cs:1989
+                (Inactivate cascade).
+
+                The single-field shape collapses these into one. The
+                immediate-children-any-state semantic chosen here is
+                correct for #1 and an over-approximation for #2 — the
+                Inactivate-children checkbox may render in the narrow
+                case where a group has only inactive direct descendants;
+                toggling it is harmless (the cascade no-ops) but
+                slightly confusing UX. Splitting into two bag fields is
+                the right long-term shape; deferred until Phase 5 since
+                Phase 5 touches the cascade neighborhood.
+
+                Reason: deliberate one-field shape with documented
+                imperfect parity for the Inactivate prompt.
+            */
             var hasChildGroups = entity.Id > 0 && new GroupService( RockContext ).Queryable().Any( g => g.ParentGroupId == entity.Id );
 
             return new GroupBag
@@ -462,7 +556,7 @@ namespace Rock.Blocks.Group
                 // the Vue partial.
                 PhotoUrl = entity.PhotoUrl,
                 Description = entity.Description,
-                Administrator = BuildAdministratorRef( entity.GroupAdministratorPersonAlias?.Person, groupType ),
+                Administrator = BuildAdministratorRef( entity.GroupAdministratorPersonAlias, groupType ),
                 ParentGroup = BuildParentGroupRef( entity.ParentGroup ),
                 ScheduleFriendlyText = entity.Schedule?.FriendlyScheduleText,
                 GroupCapacity = entity.GroupCapacity
@@ -493,14 +587,85 @@ namespace Rock.Blocks.Group
 
         /// <inheritdoc/>
         /// <remarks>
-        /// Phase 1 placeholder. The Edit block action returns a minimal
-        /// bag plus the security-grant token; the full edit-mode bag
-        /// arrives in Phase 2. The Vue layer renders an explanatory
-        /// "edit panel coming in Phase 2" message during the gap.
+        /// Phase 3 returns the full edit-mode bag: scalar fields covering
+        /// Section 1 (Top fields), Section 2 (General — Overview / Admin
+        /// &amp; Security / Relationships stacks), Section 3 (RSVP),
+        /// Section 4 Stacks 1 + 3 (Inline Schedule + Member Scheduling),
+        /// and Section 8 (Chat). The <c>Edit</c> block action also
+        /// pre-populates <c>ParentGroupId</c> on the Add path from the
+        /// <c>?ParentGroupId=N</c> page parameter (per A1).
         /// </remarks>
         protected override GroupBag GetEntityBagForEdit( Model.Group entity )
         {
-            return GetCommonEntityBag( entity );
+            if ( entity == null )
+            {
+                return null;
+            }
+
+            var bag = GetCommonEntityBag( entity );
+
+            bag.IsCurrentPersonGroupAdministrator = IsCurrentPersonGroupAdministrator();
+            bag.IsLimitedToSecurityRoleGroups = GetAttributeValue( AttributeKey.LimittoSecurityRoleGroups ).AsBoolean();
+
+            // Section 1 — Inactive flow + photo.
+            bag.InactiveReasonValueId = entity.InactiveReasonValueId;
+            bag.InactiveReasonNote = entity.InactiveReasonNote;
+            bag.InactivateChildGroups = false;
+            bag.PhotoBinaryFile = BuildBinaryFileRef( entity.Photo, entity.PhotoId );
+
+            // Section 2 Stack 1 — Overview.
+            bag.GroupTypeId = entity.GroupTypeId > 0 ? entity.GroupTypeId : ( int? ) null;
+            bag.Campus = BuildCampusListItem( entity.CampusId );
+            bag.StatusValueId = entity.StatusValueId;
+
+            // Section 2 Stack 2 — Admin & Security.
+            bag.RequiredSignatureDocumentTemplateId = entity.RequiredSignatureDocumentTemplateId;
+            bag.GroupMemberRecordSource = BuildDefinedValueListItem( entity.GroupMemberRecordSourceValueId );
+            bag.IsSecurityRole = entity.IsSecurityRole;
+            bag.ElevatedSecurityLevel = entity.ElevatedSecurityLevel;
+
+            // Section 2 Stack 3 — Relationships.
+            bag.OverrideRelationshipStrength = entity.IsOverridingGroupTypePeerNetworkConfiguration;
+            bag.RelationshipStrengthOverride = entity.RelationshipStrengthOverride.HasValue
+                ? ( RelationshipStrength? ) entity.RelationshipStrengthOverride.Value
+                : null;
+            bag.RelationshipGrowthEnabledOverride = entity.RelationshipGrowthEnabledOverride;
+            bag.LeaderToLeaderRelationshipMultiplierOverride = entity.LeaderToLeaderRelationshipMultiplierOverride;
+            bag.LeaderToNonLeaderRelationshipMultiplierOverride = entity.LeaderToNonLeaderRelationshipMultiplierOverride;
+            bag.NonLeaderToLeaderRelationshipMultiplierOverride = entity.NonLeaderToLeaderRelationshipMultiplierOverride;
+            bag.NonLeaderToNonLeaderRelationshipMultiplierOverride = entity.NonLeaderToNonLeaderRelationshipMultiplierOverride;
+
+            // Section 3 — RSVP.
+            bag.RsvpReminderOffsetDays = entity.RSVPReminderOffsetDays;
+            bag.RsvpReminderSystemCommunicationGuid = entity.RSVPReminderSystemCommunicationId.HasValue
+                ? new SystemCommunicationService( RockContext ).GetSelect( entity.RSVPReminderSystemCommunicationId.Value, c => ( Guid? ) c.Guid )
+                : null;
+
+            // Section 4 Stack 1 — Inline Schedule.
+            HydrateScheduleFields( bag, entity );
+
+            // Section 4 Stack 3 — Member Scheduling.
+            bag.SchedulingMustMeetRequirements = entity.SchedulingMustMeetRequirements;
+            bag.DisableScheduling = entity.DisableScheduling;
+            bag.DisableScheduleToolboxAccess = entity.DisableScheduleToolboxAccess;
+            bag.ScheduleConfirmationLogic = entity.ScheduleConfirmationLogic;
+            bag.ScheduleCoordinatorPerson = BuildPersonAliasListItemBag( entity.ScheduleCoordinatorPersonAlias );
+            bag.ScheduleCoordinatorNotificationTypes = entity.ScheduleCoordinatorNotificationTypes ?? ScheduleCoordinatorNotificationType.None;
+            bag.AttendanceRecordRequiredForCheckIn = entity.AttendanceRecordRequiredForCheckIn;
+
+            // Section 8 — Chat.
+            bag.IsChatEnabledOverride = entity.IsChatEnabledOverride;
+            bag.IsLeavingChatChannelAllowedOverride = entity.IsLeavingChatChannelAllowedOverride;
+            bag.IsChatChannelPublicOverride = entity.IsChatChannelPublicOverride;
+            bag.IsChatChannelAlwaysShownOverride = entity.IsChatChannelAlwaysShownOverride;
+            bag.ChatPushNotificationModeOverride = entity.ChatPushNotificationModeOverride;
+            bag.ChatChannelAvatarBinaryFile = BuildBinaryFileRef( entity.ChatChannelAvatarBinaryFile, entity.ChatChannelAvatarBinaryFileId );
+
+            // The Phase 1 / 2 view-mode notification surface is intentionally
+            // not surfaced in edit mode (per Q3.7 lock).
+            bag.RoleLimitWarning = null;
+
+            return bag;
         }
 
         /// <inheritdoc/>
@@ -517,6 +682,8 @@ namespace Rock.Blocks.Group
             {
                 entity = new Model.Group();
                 entityService.Add( entity );
+
+                ApplyNewGroupDefaultValues( entity, entityService );
             }
 
             if ( entity == null )
@@ -536,14 +703,215 @@ namespace Rock.Blocks.Group
 
         /// <inheritdoc/>
         /// <remarks>
-        /// Phase 1 ships no Save body. The full Save flow lands in Phase
-        /// 2 alongside the edit-panel scalar fields. Returning false here
-        /// would have <c>Save</c> abort if it were ever invoked, but
-        /// Phase 1 does not register a Save block action either.
+        /// Implements the scalar field assignments per Phase 3 spec
+        /// checklist S3, with the GroupType-conditional cascades for
+        /// peer-network (S13), RSVP (S14), and record source (S15).
+        /// Inline-schedule lifecycle (S8) and inactive cascade (S7) /
+        /// IsTemporary toggles (steps 6/7 of the WrapTransaction
+        /// ordering) run inside <c>Save</c> rather than here so they can
+        /// observe pre-vs-post save state.
         /// </remarks>
         protected override bool UpdateEntityFromBox( Model.Group entity, ValidPropertiesBox<GroupBag> box )
         {
-            return false;
+            if ( box.ValidProperties == null )
+            {
+                return false;
+            }
+
+            box.IfValidProperty( nameof( box.Bag.Name ),
+                () => entity.Name = box.Bag.Name );
+
+            box.IfValidProperty( nameof( box.Bag.Description ),
+                () => entity.Description = box.Bag.Description );
+
+            box.IfValidProperty( nameof( box.Bag.IsActive ), () =>
+            {
+                entity.IsActive = box.Bag.IsActive;
+
+                // Don't persist inactive properties when active.
+                if ( box.Bag.IsActive )
+                {
+                    entity.InactiveReasonValueId = null;
+                    entity.InactiveReasonNote = null;
+                }
+                else
+                {
+                    entity.InactiveReasonValueId = box.Bag.InactiveReasonValueId;
+                    entity.InactiveReasonNote = box.Bag.InactiveReasonNote;
+                }
+            } );
+
+            box.IfValidProperty( nameof( box.Bag.IsPublic ),
+                () => entity.IsPublic = box.Bag.IsPublic );
+
+            box.IfValidProperty( nameof( box.Bag.GroupTypeId ), () =>
+            {
+                if ( box.Bag.GroupTypeId.HasValue && box.Bag.GroupTypeId.Value > 0 )
+                {
+                    entity.GroupTypeId = box.Bag.GroupTypeId.Value;
+                }
+            } );
+
+            // Resolve the GroupType AFTER the GroupTypeId has been assigned.
+            var groupType = GetGroupTypeCache( entity );
+
+            box.IfValidProperty( nameof( box.Bag.ParentGroup ),
+                () => entity.ParentGroupId = box.Bag.ParentGroup?.GetEntityId<Model.Group>( RockContext ) );
+
+            box.IfValidProperty( nameof( box.Bag.Campus ),
+                () => entity.CampusId = box.Bag.Campus?.GetEntityId<Campus>( RockContext ) );
+
+            box.IfValidProperty( nameof( box.Bag.StatusValueId ),
+                () => entity.StatusValueId = box.Bag.StatusValueId );
+
+            box.IfValidProperty( nameof( box.Bag.GroupCapacity ),
+                () => entity.GroupCapacity = box.Bag.GroupCapacity );
+
+            box.IfValidProperty( nameof( box.Bag.RequiredSignatureDocumentTemplateId ),
+                () => entity.RequiredSignatureDocumentTemplateId = box.Bag.RequiredSignatureDocumentTemplateId );
+
+            box.IfValidProperty( nameof( box.Bag.Administrator ), () =>
+            {
+                if ( groupType != null && groupType.ShowAdministrator )
+                {
+                    var aliasGuid = box.Bag.Administrator?.Value.AsGuidOrNull();
+                    entity.GroupAdministratorPersonAliasId = aliasGuid.HasValue
+                        ? new PersonAliasService( RockContext ).GetSelect( aliasGuid.Value, pa => ( int? ) pa.Id )
+                        : null;
+                }
+            } );
+
+            // Member Record Source (S15) — only when the group type allows.
+            box.IfValidProperty( nameof( box.Bag.GroupMemberRecordSource ), () =>
+            {
+                if ( groupType != null && groupType.AllowGroupSpecificRecordSource )
+                {
+                    entity.GroupMemberRecordSourceValueId = box.Bag.GroupMemberRecordSource?.GetEntityId<DefinedValue>( RockContext );
+                }
+                else
+                {
+                    entity.GroupMemberRecordSourceValueId = null;
+                }
+            } );
+
+            // IsSecurityRole (S6) — force-true when block attribute set.
+            box.IfValidProperty( nameof( box.Bag.IsSecurityRole ), () =>
+            {
+                entity.IsSecurityRole = box.Bag.IsSecurityRole;
+                if ( GetAttributeValue( AttributeKey.LimittoSecurityRoleGroups ).AsBoolean() )
+                {
+                    entity.IsSecurityRole = true;
+                }
+            } );
+
+            box.IfValidProperty( nameof( box.Bag.ElevatedSecurityLevel ), () =>
+            {
+                entity.ElevatedSecurityLevel = box.Bag.ElevatedSecurityLevel;
+                if ( !entity.IsSecurityRole )
+                {
+                    entity.ElevatedSecurityLevel = Rock.Utility.Enums.ElevatedSecurityLevel.None;
+                }
+            } );
+
+            // Peer Network overrides (S13) — only when the group type
+            // enables peer-network AND the user checks the override box.
+            box.IfValidProperty( nameof( box.Bag.OverrideRelationshipStrength ), () =>
+            {
+                var isPeerNetworkEnabled = groupType?.IsPeerNetworkEnabled == true;
+
+                if ( isPeerNetworkEnabled && box.Bag.OverrideRelationshipStrength )
+                {
+                    entity.RelationshipStrengthOverride = ( int? ) ( box.Bag.RelationshipStrengthOverride ?? RelationshipStrength.None );
+                    entity.RelationshipGrowthEnabledOverride = box.Bag.RelationshipGrowthEnabledOverride;
+
+                    entity.LeaderToLeaderRelationshipMultiplierOverride = box.Bag.LeaderToLeaderRelationshipMultiplierOverride;
+                    entity.LeaderToNonLeaderRelationshipMultiplierOverride = box.Bag.LeaderToNonLeaderRelationshipMultiplierOverride;
+                    entity.NonLeaderToLeaderRelationshipMultiplierOverride = box.Bag.NonLeaderToLeaderRelationshipMultiplierOverride;
+                    entity.NonLeaderToNonLeaderRelationshipMultiplierOverride = box.Bag.NonLeaderToNonLeaderRelationshipMultiplierOverride;
+                }
+                else if ( isPeerNetworkEnabled )
+                {
+                    entity.RelationshipStrengthOverride = null;
+                    entity.RelationshipGrowthEnabledOverride = null;
+                    entity.LeaderToLeaderRelationshipMultiplierOverride = null;
+                    entity.LeaderToNonLeaderRelationshipMultiplierOverride = null;
+                    entity.NonLeaderToLeaderRelationshipMultiplierOverride = null;
+                    entity.NonLeaderToNonLeaderRelationshipMultiplierOverride = null;
+                }
+            } );
+
+            // RSVP overrides (S14) — null out per group type pinning.
+            box.IfValidProperty( nameof( box.Bag.RsvpReminderOffsetDays ), () =>
+            {
+                if ( groupType?.EnableRSVP == true )
+                {
+                    entity.RSVPReminderOffsetDays = groupType.RSVPReminderOffsetDays.HasValue
+                        ? ( int? ) null
+                        : box.Bag.RsvpReminderOffsetDays;
+                }
+                else
+                {
+                    entity.RSVPReminderOffsetDays = null;
+                }
+            } );
+
+            box.IfValidProperty( nameof( box.Bag.RsvpReminderSystemCommunicationGuid ), () =>
+            {
+                if ( groupType?.EnableRSVP == true )
+                {
+                    entity.RSVPReminderSystemCommunicationId = groupType.RSVPReminderSystemCommunicationId.HasValue
+                        ? ( int? ) null
+                        : ( box.Bag.RsvpReminderSystemCommunicationGuid.HasValue
+                            ? new SystemCommunicationService( RockContext ).GetSelect( box.Bag.RsvpReminderSystemCommunicationGuid.Value, c => ( int? ) c.Id )
+                            : null );
+                }
+                else
+                {
+                    entity.RSVPReminderSystemCommunicationId = null;
+                }
+            } );
+
+            // Member Scheduling.
+            box.IfValidProperty( nameof( box.Bag.SchedulingMustMeetRequirements ),
+                () => entity.SchedulingMustMeetRequirements = box.Bag.SchedulingMustMeetRequirements );
+
+            box.IfValidProperty( nameof( box.Bag.DisableScheduling ),
+                () => entity.DisableScheduling = box.Bag.DisableScheduling );
+
+            box.IfValidProperty( nameof( box.Bag.DisableScheduleToolboxAccess ),
+                () => entity.DisableScheduleToolboxAccess = box.Bag.DisableScheduleToolboxAccess );
+
+            box.IfValidProperty( nameof( box.Bag.ScheduleConfirmationLogic ),
+                () => entity.ScheduleConfirmationLogic = box.Bag.ScheduleConfirmationLogic );
+
+            box.IfValidProperty( nameof( box.Bag.ScheduleCoordinatorPerson ), () =>
+            {
+                var aliasGuid = box.Bag.ScheduleCoordinatorPerson?.Value.AsGuidOrNull();
+                entity.ScheduleCoordinatorPersonAliasId = aliasGuid.HasValue
+                    ? new PersonAliasService( RockContext ).GetSelect( aliasGuid.Value, pa => ( int? ) pa.Id )
+                    : null;
+            } );
+
+            box.IfValidProperty( nameof( box.Bag.ScheduleCoordinatorNotificationTypes ),
+                () => entity.ScheduleCoordinatorNotificationTypes = box.Bag.ScheduleCoordinatorNotificationTypes );
+
+            box.IfValidProperty( nameof( box.Bag.AttendanceRecordRequiredForCheckIn ),
+                () => entity.AttendanceRecordRequiredForCheckIn = box.Bag.AttendanceRecordRequiredForCheckIn );
+
+            // Chat overrides — only when the group type allows.
+            box.IfValidProperty( nameof( box.Bag.IsChatEnabledOverride ), () =>
+            {
+                if ( ChatHelper.IsChatEnabled && groupType?.IsChatAllowed == true )
+                {
+                    entity.IsChatEnabledOverride = box.Bag.IsChatEnabledOverride;
+                    entity.IsLeavingChatChannelAllowedOverride = box.Bag.IsLeavingChatChannelAllowedOverride;
+                    entity.IsChatChannelPublicOverride = box.Bag.IsChatChannelPublicOverride;
+                    entity.IsChatChannelAlwaysShownOverride = box.Bag.IsChatChannelAlwaysShownOverride;
+                    entity.ChatPushNotificationModeOverride = box.Bag.ChatPushNotificationModeOverride;
+                }
+            } );
+
+            return true;
         }
 
         /// <inheritdoc/>
@@ -639,15 +1007,142 @@ namespace Rock.Blocks.Group
             };
         }
 
+        /// <summary>
+        /// Applies default values to a new <see cref="Model.Group"/>:
+        /// (1) pre-populates the parent group from the
+        /// <c>?ParentGroupId=N</c> page parameter; (2) defaults
+        /// <c>GroupTypeId</c> to the security-role group type when the
+        /// <c>LimittoSecurityRoleGroups</c> block attribute is on; (3)
+        /// auto-picks <c>GroupTypeId</c> when the parent group narrows
+        /// the allowed child types to exactly one auth-survivable
+        /// option (matches WebForms <c>ShowDetail</c> at
+        /// <see href="../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs#L1782"/>).
+        /// Add path only — returns immediately when the entity is null
+        /// or already has an Id.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        /// <param name="groupService">An optional service instance to use for queries.</param>
+        private void ApplyNewGroupDefaultValues( Model.Group entity, GroupService groupService = null )
+        {
+            if ( entity == null || entity.Id != 0 )
+            {
+                return;
+            }
+
+            groupService = groupService ?? new GroupService( RockContext );
+
+            // (1) Pre-populate parent group from ?ParentGroupId=N.
+            var parentGroupParam = PageParameter( PageParameterKey.ParentGroupId );
+            if ( parentGroupParam.IsNotNullOrWhiteSpace() )
+            {
+                var parentGroup = groupService.Get( parentGroupParam, !PageCache.Layout.Site.DisablePredictableIds );
+                if ( parentGroup != null )
+                {
+                    entity.ParentGroupId = parentGroup.Id;
+                    entity.ParentGroup = parentGroup;
+                }
+            }
+
+            // (2) Block locked to security-role groups → default
+            // GroupType to the security-role group type. Skip the
+            // parent-driven auto-pick below since the dropdown is
+            // already constrained to a single option.
+            if ( GetAttributeValue( AttributeKey.LimittoSecurityRoleGroups ).AsBoolean() )
+            {
+                var securityRoleGroupType = GroupTypeCache.GetSecurityRoleGroupType();
+                if ( securityRoleGroupType != null )
+                {
+                    entity.GroupTypeId = securityRoleGroupType.Id;
+                }
+                return;
+            }
+
+            // (3) Parent narrows allowed child types — auto-pick the
+            // single auth-survivable option, otherwise leave blank so
+            // the user is forced to choose.
+            if ( entity.ParentGroup != null )
+            {
+                var allowedChildGroupTypes = GetAllowedGroupTypes( GroupTypeCache.Get( entity.ParentGroup.GroupTypeId ), RockContext ).ToList();
+
+                var authorizedGroupTypes = new List<Model.GroupType>();
+                foreach ( var allowedGroupType in allowedChildGroupTypes )
+                {
+                    // Probe auth by temporarily assigning the group type
+                    // and asking the entity. Mirrors WebForms parity.
+                    entity.GroupTypeId = allowedGroupType.Id;
+                    entity.GroupType = allowedGroupType;
+
+                    if ( entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
+                    {
+                        authorizedGroupTypes.Add( allowedGroupType );
+                    }
+                }
+
+                if ( authorizedGroupTypes.Count == 1 )
+                {
+                    entity.GroupType = authorizedGroupTypes[0];
+                    entity.GroupTypeId = authorizedGroupTypes[0].Id;
+                }
+                else
+                {
+                    // Reset so the user picks. If zero are authorized,
+                    // the downstream IsAuthorized check on the entity
+                    // will fall back to ParentGroup-based auth.
+                    entity.GroupType = null;
+                    entity.GroupTypeId = 0;
+                }
+            }
+        }
+
         #endregion Methods
 
         #region Block Actions
 
         /// <summary>
-        /// Returns the bag for entering edit mode. Phase 1 returns the
-        /// same view-mode bag plus the security grant token; the full
-        /// edit-mode bag (scalar fields, GroupType cascade, peer-network
-        /// overrides, RSVP / Scheduling / Chat sections) lands in Phase 2.
+        /// Returns the per-GroupType options payload for the active
+        /// GroupType selection (Q2 Approach B server round-trip per
+        /// change). Re-checks EDIT auth using the page-parameter entity
+        /// before resolving the requested GroupType.
+        /// </summary>
+        [BlockAction]
+        public BlockActionResult GetGroupTypeOptions( int groupTypeId )
+        {
+            // Re-check EDIT on the entity. Add path uses a fresh entity
+            // and inherits page-level EDIT auth.
+            var entity = GetInitialEntity();
+            if ( entity == null )
+            {
+                return ActionBadRequest( $"{Model.Group.FriendlyTypeName} not found." );
+            }
+
+            if ( !entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
+            {
+                return ActionBadRequest( $"Not authorized to edit {Model.Group.FriendlyTypeName}." );
+            }
+
+            if ( groupTypeId <= 0 )
+            {
+                return ActionBadRequest( "Group Type is required." );
+            }
+
+            var groupType = GroupTypeCache.Get( groupTypeId );
+            if ( groupType == null )
+            {
+                return ActionBadRequest( "Group Type not found." );
+            }
+
+            return ActionOk( BuildGroupTypeOptionsBag( groupTypeId ) );
+        }
+
+        /// <summary>
+        /// Returns the bag for entering edit mode. Existing groups load via
+        /// <see cref="TryGetEntityForEditAction(string, out Model.Group, out BlockActionResult)"/>;
+        /// the Add path constructs a fresh entity in that same call and
+        /// applies Add-mode defaults via <see cref="ApplyNewGroupDefaultValues"/>.
+        /// The Vue side reactively fetches <see cref="GroupTypeOptionsBag"/>
+        /// via the <c>GetGroupTypeOptions</c> action whenever
+        /// <c>bag.groupTypeId</c> changes, so this action only returns the
+        /// standard properties bag.
         /// </summary>
         [BlockAction]
         public BlockActionResult Edit( string key )
@@ -662,7 +1157,213 @@ namespace Rock.Blocks.Group
             return ActionOk( new ValidPropertiesBox<GroupBag>
             {
                 Bag = bag,
-                ValidProperties = new List<string>()
+                ValidProperties = bag.GetType().GetProperties().Select( p => p.Name ).ToList()
+            } );
+        }
+
+        /// <summary>
+        /// Saves the group from its edit-mode bag. Implements the
+        /// 8-step <c>WrapTransaction</c> ordering locked in Q3.5:
+        /// (1) Add(group) if new + (2) UpdateEntityFromBox + (3)
+        /// SaveChanges; (4) AllowPerson when Add and the
+        /// <c>AddAdministrateSecurityToGroupCreator</c> attribute is on;
+        /// (5) Inactive cascade through descendants when "Also
+        /// Inactivate Child Groups" is checked; (6) chat-avatar
+        /// IsTemporary toggle; (7) photo IsTemporary toggle (mirroring
+        /// chat-avatar); (8) SaveChanges. Validation gates 1-8 from
+        /// webforms/23-validations-and-cascades.md fire before the
+        /// transaction opens.
+        /// </summary>
+        [BlockAction]
+        public BlockActionResult Save( ValidPropertiesBox<GroupBag> box )
+        {
+            if ( box?.Bag == null )
+            {
+                return ActionBadRequest( "Invalid request." );
+            }
+
+            if ( !TryGetEntityForEditAction( box.Bag.IdKey, out var entity, out var actionError ) )
+            {
+                return actionError;
+            }
+
+            var roleGroupTypeId = GroupTypeCache.GetId( Rock.SystemGuid.GroupType.GROUPTYPE_SECURITY_ROLE.AsGuid() ) ?? int.MinValue;
+
+            // Capture before-state for IsSecurityRole flip detection (S12).
+            var wasSecurityRole = entity.Id != 0
+                && entity.IsActive
+                && ( entity.IsSecurityRole || entity.GroupTypeId == roleGroupTypeId );
+
+            // Capture orphan candidates before mutation.
+            var oldPhotoId = entity.PhotoId;
+            var oldChatChannelAvatarId = entity.ChatChannelAvatarBinaryFileId;
+            var oldScheduleId = entity.ScheduleId;
+
+            // Validation gate 1 — Group Type chosen.
+            if ( !box.Bag.GroupTypeId.HasValue || box.Bag.GroupTypeId.Value <= 0 )
+            {
+                return ActionBadRequest( WarningMessage.CannotBeBlank( Model.GroupType.FriendlyTypeName ) );
+            }
+
+            // Apply scalar field assignments.
+            if ( !UpdateEntityFromBox( entity, box ) )
+            {
+                return ActionBadRequest( "Invalid data." );
+            }
+
+            // Validation gate 2 — self-parent check.
+            if ( entity.Id != 0 && entity.ParentGroupId == entity.Id )
+            {
+                return ActionBadRequest( "Group cannot be a Parent Group of itself." );
+            }
+
+            // Apply photo / chat-avatar / inline-schedule mutations
+            // outside the IfValidProperty pattern because each requires
+            // contextual state (orphan tracking, schedule lifecycle) that
+            // doesn't fit the partial-update pattern.
+            ApplyPhotoBinaryFile( entity, box.Bag );
+            ApplyChatChannelAvatarBinaryFile( entity, box.Bag );
+            ApplyInlineSchedule( entity, box.Bag );
+
+            // Validation gate 5 — parent allows this group type. Reuse
+            // the already-loaded ParentGroup navigation when available
+            // (e.g., when ApplyNewGroupDefaultValues pre-populated it on
+            // the Add-from-tree path) to avoid a redundant query.
+            if ( entity.ParentGroupId.HasValue )
+            {
+                var parentGroup = entity.ParentGroup ?? new GroupService( RockContext ).Get( entity.ParentGroupId.Value );
+                if ( parentGroup != null )
+                {
+                    var allowedGroupTypeIds = GetAllowedGroupTypes( GroupTypeCache.Get( parentGroup.GroupTypeId ), RockContext )
+                        .Select( gt => gt.Id )
+                        .ToList();
+                    if ( !allowedGroupTypeIds.Contains( entity.GroupTypeId ) )
+                    {
+                        var groupTypeForError = GroupTypeCache.Get( entity.GroupTypeId );
+                        return ActionBadRequest( $"The '{parentGroup.Name}' group does not allow child groups with a '{groupTypeForError?.Name ?? string.Empty}' group type." );
+                    }
+                }
+            }
+
+            // Validation gate 6 — re-check EDIT now that GroupType /
+            // ParentGroup may have been swapped.
+            if ( !entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
+            {
+                return ActionBadRequest( $"Not authorized to edit {Model.Group.FriendlyTypeName}." );
+            }
+
+            // Validation gate 8 — Group.IsValid (model-level rules,
+            // including GroupsRequireCampus).
+            if ( !entity.IsValid )
+            {
+                return ActionBadRequest( entity.ValidationResults.Select( r => r.ErrorMessage ).ToList().AsDelimited( "; " ) );
+            }
+
+            var isNew = entity.Id == 0;
+            var addAdministrateSecurity = isNew
+                && GetAttributeValue( AttributeKey.AddAdministrateSecurityToGroupCreator ).AsBoolean();
+
+            RockContext.WrapTransaction( () =>
+            {
+                // Step 1 — Add(group) implicitly handled by EF tracking
+                //          (TryGetEntityForEditAction calls Service.Add for
+                //          new entities). Step 2 (UpdateEntityFromBox)
+                //          already ran above. Step 3 — SaveChanges to
+                //          assign group.Id.
+                RockContext.SaveChanges();
+
+                // Step 4 — Add ADMINISTRATE to group creator on Add.
+                if ( addAdministrateSecurity )
+                {
+                    Authorization.AllowPerson( entity, Authorization.ADMINISTRATE, RequestContext.CurrentPerson, RockContext );
+                }
+
+                // Step 5 — Inactive cascade to descendants.
+                if ( !entity.IsActive && box.Bag.InactivateChildGroups )
+                {
+                    var groupService = new GroupService( RockContext );
+                    var allActiveDescendantIds = groupService.GetAllDescendentGroupIds( entity.Id, includeInactiveChildGroups: false );
+                    var allActiveDescendants = groupService.GetByIds( allActiveDescendantIds );
+                    foreach ( var descendant in allActiveDescendants )
+                    {
+                        if ( descendant.IsActive )
+                        {
+                            descendant.IsActive = false;
+                            descendant.InactiveReasonValueId = box.Bag.InactiveReasonValueId;
+                            descendant.InactiveReasonNote = "Parent Deactivated";
+                            if ( box.Bag.InactiveReasonNote.IsNotNullOrWhiteSpace() )
+                            {
+                                descendant.InactiveReasonNote += ": " + box.Bag.InactiveReasonNote;
+                            }
+                        }
+                    }
+                }
+
+                // Steps 6 + 7 — IsTemporary toggles for orphaned + active
+                // BinaryFiles (chat avatar + photo).
+                ToggleBinaryFileIsTemporary( oldChatChannelAvatarId, entity.ChatChannelAvatarBinaryFileId );
+                ToggleBinaryFileIsTemporary( oldPhotoId, entity.PhotoId );
+
+                // Step 8 — Persist the inactive cascade + IsTemporary
+                // toggles + (if any) inline schedule deletion.
+                if ( oldScheduleId.HasValue && oldScheduleId.Value != ( entity.ScheduleId ?? 0 ) )
+                {
+                    DeleteInlineSchedule( oldScheduleId.Value );
+                }
+
+                RockContext.SaveChanges();
+            } );
+
+            // Cache invalidation — IsSecurityRole flip (S11).
+            var isNowSecurityRole = entity.IsActive && ( entity.IsSecurityRole || entity.GroupTypeId == roleGroupTypeId );
+            if ( wasSecurityRole != isNowSecurityRole )
+            {
+                Authorization.Clear();
+            }
+
+            // Honor a same-origin ?returnUrl=N if set, mirroring WebForms
+            // parity at GroupDetail.ascx.cs:1438-1441 (unconditional, no
+            // autoEdit gate). The <DetailBlock> framework template only
+            // honors ?returnUrl= when ?autoEdit=true is also set
+            // (detailBlock.ts:736-744 gates on isAutoEditMode), so for
+            // non-autoEdit Save flows the redirect must be echoed by
+            // the block action. The framework's onSave handler treats
+            // string results as redirect URLs.
+            var saveReturnUrl = PageParameter( PageParameterKey.ReturnUrl );
+            if ( saveReturnUrl.IsNotNullOrWhiteSpace() && IsSafeReturnUrl( saveReturnUrl ) )
+            {
+                return ActionContent( System.Net.HttpStatusCode.OK, saveReturnUrl );
+            }
+
+            if ( isNew )
+            {
+                // Preserve ExpandedIds so the post-Add reload keeps the
+                // tree-navigation context the user came in with. Mirrors
+                // WebForms btnSave_Click at GroupDetail.ascx.cs:1447 and
+                // the Copy block action's same handling.
+                var qryParams = new Dictionary<string, string>
+                {
+                    [PageParameterKey.GroupId] = entity.IdKey
+                };
+
+                var expandedIds = PageParameter( PageParameterKey.ExpandedIds );
+                if ( expandedIds.IsNotNullOrWhiteSpace() )
+                {
+                    qryParams[PageParameterKey.ExpandedIds] = expandedIds;
+                }
+
+                var redirectUrl = this.GetCurrentPageUrl( qryParams );
+                return ActionContent( System.Net.HttpStatusCode.Created, redirectUrl );
+            }
+
+            // Refresh navigation properties before re-bagging.
+            entity = new GroupService( RockContext ).Get( entity.Id );
+            var refreshedBag = GetEntityBagForEdit( entity );
+
+            return ActionOk( new ValidPropertiesBox<GroupBag>
+            {
+                Bag = refreshedBag,
+                ValidProperties = refreshedBag.GetType().GetProperties().Select( p => p.Name ).ToList()
             } );
         }
 
@@ -859,22 +1560,24 @@ namespace Rock.Blocks.Group
         #region Helper Methods
 
         /// <summary>
-        /// Resolves the cached <see cref="GroupTypeCache"/> for the supplied
-        /// entity, returning null when the entity is null or has no
-        /// resolvable <c>GroupTypeId</c>. Centralizes the lookup so callers
-        /// don't repeat the null / zero-Id guards. Callers that need to
-        /// further restrict to saved groups (e.g., features that don't
-        /// apply during Add mode) should layer an <c>entity.Id &gt; 0</c>
-        /// check on top.
+        /// Returns the <see cref="GroupTypeCache"/> for the entity, or null
+        /// when no group type is set. Memoized per-request; re-resolves if
+        /// the entity's <c>GroupTypeId</c> changes.
         /// </summary>
-        private static GroupTypeCache GetGroupTypeCache( Model.Group entity )
+        private GroupTypeCache GetGroupTypeCache( Model.Group entity )
         {
             if ( entity == null || entity.GroupTypeId <= 0 )
             {
                 return null;
             }
 
-            return GroupTypeCache.Get( entity.GroupTypeId );
+            if ( _cachedGroupType?.Id == entity.GroupTypeId )
+            {
+                return _cachedGroupType;
+            }
+
+            _cachedGroupType = GroupTypeCache.Get( entity.GroupTypeId );
+            return _cachedGroupType;
         }
 
         /// <summary>
@@ -920,6 +1623,24 @@ namespace Rock.Blocks.Group
         }
 
         /// <summary>
+        /// Returns true when the current user is a member of the
+        /// GROUP_ADMINISTRATORS system group. Per WebForms parity, only
+        /// such members can toggle the "Enable as Security Role" box.
+        /// </summary>
+        private bool IsCurrentPersonGroupAdministrator()
+        {
+            var currentPersonId = RequestContext.CurrentPerson?.Id;
+            if ( !currentPersonId.HasValue )
+            {
+                return false;
+            }
+
+            return new GroupService( RockContext ).GroupHasMember(
+                Rock.SystemGuid.Group.GROUP_ADMINISTRATORS.AsGuid(),
+                currentPersonId.Value );
+        }
+
+        /// <summary>
         /// Builds the administrator reference for the Overview card.
         /// Returns null when the person is missing OR when the group
         /// type's <c>ShowAdministrator</c> flag is false (which hides
@@ -928,8 +1649,10 @@ namespace Rock.Blocks.Group
         /// Person <c>LinkUrlLavaTemplate</c> is honored; the fallback is
         /// <c>/Person/{IdKey}</c>.
         /// </summary>
-        private static GroupAdministratorBag BuildAdministratorRef( Person person, GroupTypeCache groupType )
+        private static GroupAdministratorBag BuildAdministratorRef( PersonAlias personAlias, GroupTypeCache groupType )
         {
+            var person = personAlias?.Person;
+
             if ( person == null || groupType == null || !groupType.ShowAdministrator )
             {
                 return null;
@@ -937,7 +1660,8 @@ namespace Rock.Blocks.Group
 
             return new GroupAdministratorBag
             {
-                Name = person.FullName,
+                Value = personAlias.Guid.ToString(),
+                Text = person.FullName,
                 Url = ResolveEntityUrl( typeof( Person ), person, fallbackUrl: $"/Person/{person.IdKey}" )
             };
         }
@@ -959,7 +1683,8 @@ namespace Rock.Blocks.Group
 
             return new ParentGroupBag
             {
-                Name = parentGroup.Name,
+                Value = parentGroup.Guid.ToString(),
+                Text = parentGroup.Name,
                 Url = ResolveEntityUrl( typeof( Model.Group ), parentGroup, fallbackUrl: $"/Group/{parentGroup.IdKey}" )
             };
         }
@@ -1034,6 +1759,551 @@ namespace Rock.Blocks.Group
             }
 
             return fallbackUrl;
+        }
+
+        /// <summary>
+        /// Builds a <see cref="ListItemBag"/> reference for an
+        /// <c>&lt;ImageUploader&gt;</c> bound BinaryFile. Returns null
+        /// when no file is attached. Prefers a fully-loaded navigation
+        /// property when available (avoids an extra fetch); falls back
+        /// to a service lookup when only the FK is set.
+        /// </summary>
+        private ListItemBag BuildBinaryFileRef( BinaryFile attachedFile, int? binaryFileId )
+        {
+            if ( attachedFile != null )
+            {
+                return new ListItemBag
+                {
+                    Value = attachedFile.Guid.ToString(),
+                    Text = attachedFile.FileName
+                };
+            }
+
+            if ( !binaryFileId.HasValue )
+            {
+                return null;
+            }
+
+            var file = new BinaryFileService( RockContext ).GetSelect( binaryFileId.Value, bf => new { bf.Guid, bf.FileName } );
+            if ( file == null )
+            {
+                return null;
+            }
+
+            return new ListItemBag
+            {
+                Value = file.Guid.ToString(),
+                Text = file.FileName
+            };
+        }
+
+        /// <summary>
+        /// Builds a <see cref="ListItemBag"/> reference for the
+        /// <c>&lt;CampusPicker&gt;</c>. The picker filters by Guid
+        /// (per <c>CampusPickerGetCampuses</c>), so <c>Value</c> is the
+        /// campus Guid via the canonical <c>IEntity.ToListItemBag()</c>
+        /// extension. Returns null when <paramref name="campusId"/> is
+        /// null or the cache lookup misses.
+        /// </summary>
+        private static ListItemBag BuildCampusListItem( int? campusId )
+        {
+            return campusId.HasValue
+                ? CampusCache.Get( campusId.Value )?.ToListItemBag()
+                : null;
+        }
+
+        /// <summary>
+        /// Builds a <see cref="ListItemBag"/> reference for a
+        /// <c>&lt;DefinedValuePicker&gt;</c>. The picker filters by
+        /// Guid, so <c>Value</c> is the DefinedValue Guid via the
+        /// canonical <c>IEntity.ToListItemBag()</c> extension. Returns
+        /// null when <paramref name="definedValueId"/> is null or the
+        /// cache lookup misses.
+        /// </summary>
+        private static ListItemBag BuildDefinedValueListItem( int? definedValueId )
+        {
+            return definedValueId.HasValue
+                ? DefinedValueCache.Get( definedValueId.Value )?.ToListItemBag()
+                : null;
+        }
+
+        /// <summary>
+        /// Builds a <see cref="ListItemBag"/> reference for a
+        /// <c>&lt;PersonPicker&gt;</c>. <c>Value</c> is the PersonAlias
+        /// Guid emitted by the picker; <c>Text</c> is the person's
+        /// friendly name. Returns null when the alias is null or the
+        /// underlying person is unresolvable.
+        /// </summary>
+        private static ListItemBag BuildPersonAliasListItemBag( PersonAlias personAlias )
+        {
+            var person = personAlias?.Person;
+            if ( person == null )
+            {
+                return null;
+            }
+
+            return new ListItemBag
+            {
+                Value = personAlias.Guid.ToString(),
+                Text = person.FullName
+            };
+        }
+
+        /// <summary>
+        /// Hydrates the bag's Section 4 Stack 1 fields from the entity's
+        /// <c>Schedule</c> navigation. Inline (string.Empty Name)
+        /// schedules surface as Weekly or Custom per the Schedule's own
+        /// type; named schedules surface their Id; null schedule
+        /// surfaces as <c>ScheduleType.None</c>.
+        /// </summary>
+        private static void HydrateScheduleFields( GroupBag bag, Model.Group entity )
+        {
+            bag.ScheduleType = ScheduleType.None;
+            bag.WeeklyDayOfWeek = null;
+            bag.WeeklyTimeOfDay = null;
+            bag.ICalendarContent = null;
+            bag.NamedSchedule = null;
+
+            var schedule = entity.Schedule;
+            if ( schedule == null )
+            {
+                return;
+            }
+
+            switch ( schedule.ScheduleType )
+            {
+                case ScheduleType.Named:
+                    bag.ScheduleType = ScheduleType.Named;
+                    bag.NamedSchedule = schedule.ToListItemBag();
+                    break;
+
+                case ScheduleType.Custom:
+                    bag.ScheduleType = ScheduleType.Custom;
+                    bag.ICalendarContent = schedule.iCalendarContent;
+                    break;
+
+                case ScheduleType.Weekly:
+                    bag.ScheduleType = ScheduleType.Weekly;
+                    bag.WeeklyDayOfWeek = schedule.WeeklyDayOfWeek;
+                    bag.WeeklyTimeOfDay = schedule.WeeklyTimeOfDay?.ToString();
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Applies the photo BinaryFile change to the entity. Resolves
+        /// the bag's ListItemBag (which carries the BinaryFile Guid) to
+        /// a BinaryFile.Id and assigns to <c>Group.PhotoId</c>. Null
+        /// clears the assignment.
+        /// </summary>
+        private void ApplyPhotoBinaryFile( Model.Group entity, GroupBag bag )
+        {
+            var newGuid = bag.PhotoBinaryFile?.Value.AsGuidOrNull();
+            entity.PhotoId = newGuid.HasValue
+                ? new BinaryFileService( RockContext ).GetSelect( newGuid.Value, bf => ( int? ) bf.Id )
+                : null;
+        }
+
+        /// <summary>
+        /// Applies the chat-channel-avatar BinaryFile change to the
+        /// entity, gated on the chat feature being enabled and the
+        /// active group type allowing chat. Mirrors the WebForms gate at
+        /// <c>GroupDetail.ascx.cs:995</c>.
+        /// </summary>
+        private void ApplyChatChannelAvatarBinaryFile( Model.Group entity, GroupBag bag )
+        {
+            var groupType = GetGroupTypeCache( entity );
+            if ( !ChatHelper.IsChatEnabled || groupType?.IsChatAllowed != true )
+            {
+                return;
+            }
+
+            var newGuid = bag.ChatChannelAvatarBinaryFile?.Value.AsGuidOrNull();
+            entity.ChatChannelAvatarBinaryFileId = newGuid.HasValue
+                ? new BinaryFileService( RockContext ).GetSelect( newGuid.Value, bf => ( int? ) bf.Id )
+                : null;
+        }
+
+        /// <summary>
+        /// Applies the inline-schedule lifecycle on save: gate-3 / gate-4
+        /// downgrade Custom / Weekly to None when their required inputs
+        /// are missing, then mutate <see cref="Model.Group.Schedule"/>
+        /// or <see cref="Model.Group.ScheduleId"/> accordingly. Mirrors
+        /// the WebForms inline-schedule cascade at
+        /// <c>GroupDetail.ascx.cs:1184-1252</c>.
+        /// </summary>
+        private void ApplyInlineSchedule( Model.Group entity, GroupBag bag )
+        {
+            var scheduleType = bag.ScheduleType;
+
+            // Validation gate 3 — Custom requires parseable iCal.
+            if ( scheduleType == ScheduleType.Custom )
+            {
+                if ( bag.ICalendarContent.IsNullOrWhiteSpace() )
+                {
+                    scheduleType = ScheduleType.None;
+                }
+                else
+                {
+                    var calEvent = InetCalendarHelper.CreateCalendarEvent( bag.ICalendarContent );
+                    if ( calEvent == null || calEvent.DtStart == null )
+                    {
+                        scheduleType = ScheduleType.None;
+                    }
+                }
+            }
+
+            // Validation gate 4 — Weekly requires a DayOfWeek.
+            if ( scheduleType == ScheduleType.Weekly && !bag.WeeklyDayOfWeek.HasValue )
+            {
+                scheduleType = ScheduleType.None;
+            }
+
+            if ( scheduleType == ScheduleType.Custom || scheduleType == ScheduleType.Weekly )
+            {
+                // Reuse existing inline schedule when present; otherwise
+                // create a new one with Name = string.Empty (the inline
+                // marker per webforms/07).
+                if ( entity.Schedule == null )
+                {
+                    entity.Schedule = new Schedule
+                    {
+                        Name = string.Empty
+                    };
+                }
+
+                if ( scheduleType == ScheduleType.Custom )
+                {
+                    entity.Schedule.iCalendarContent = bag.ICalendarContent;
+                    entity.Schedule.WeeklyDayOfWeek = null;
+                    entity.Schedule.WeeklyTimeOfDay = null;
+                }
+                else // Weekly
+                {
+                    entity.Schedule.iCalendarContent = null;
+                    entity.Schedule.WeeklyDayOfWeek = bag.WeeklyDayOfWeek;
+                    entity.Schedule.WeeklyTimeOfDay = ParseTimeSpanOrNull( bag.WeeklyTimeOfDay );
+                }
+            }
+            else if ( scheduleType == ScheduleType.Named )
+            {
+                var namedScheduleId = bag.NamedSchedule?.GetEntityId<Schedule>( RockContext );
+                entity.ScheduleId = namedScheduleId;
+                if ( namedScheduleId.HasValue )
+                {
+                    // Detach the EF reference; the navigation will refresh
+                    // on the next read. Without this clear, EF treats the
+                    // current Schedule navigation as the still-attached
+                    // tracked entity and tries to update its FK.
+                    entity.Schedule = null;
+                }
+            }
+            else // None
+            {
+                entity.ScheduleId = null;
+                entity.Schedule = null;
+            }
+        }
+
+        /// <summary>
+        /// Deletes the inline schedule referenced by
+        /// <paramref name="oldScheduleId"/> when no other consumer holds
+        /// it. Mirrors the WebForms cleanup at
+        /// <c>GroupDetail.ascx.cs:1230-1242</c>. Named schedules are
+        /// excluded by the <c>schedule.Name == string.Empty</c> check.
+        /// </summary>
+        private void DeleteInlineSchedule( int oldScheduleId )
+        {
+            var scheduleService = new ScheduleService( RockContext );
+            var schedule = scheduleService.Get( oldScheduleId );
+            if ( schedule == null || !string.IsNullOrEmpty( schedule.Name ) )
+            {
+                return;
+            }
+
+            if ( !scheduleService.CanDelete( schedule, out _ ) )
+            {
+                return;
+            }
+
+            scheduleService.Delete( schedule );
+        }
+
+        /// <summary>
+        /// Toggles the <c>BinaryFile.IsTemporary</c> flag on the orphaned
+        /// (true) and current (false) BinaryFiles per the chat-avatar
+        /// pattern at webforms/14-chat.md, mirroring the same pattern
+        /// for the photo. No-op when <paramref name="oldId"/> equals
+        /// <paramref name="newId"/>.
+        /// </summary>
+        private void ToggleBinaryFileIsTemporary( int? oldId, int? newId )
+        {
+            if ( oldId == newId )
+            {
+                return;
+            }
+
+            var binaryFileService = new BinaryFileService( RockContext );
+
+            if ( oldId.HasValue )
+            {
+                var orphanedFile = binaryFileService.Get( oldId.Value );
+                if ( orphanedFile != null )
+                {
+                    orphanedFile.IsTemporary = true;
+                }
+            }
+
+            if ( newId.HasValue )
+            {
+                var currentFile = binaryFileService.Get( newId.Value );
+                if ( currentFile != null )
+                {
+                    currentFile.IsTemporary = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Parses an ISO-8601 time-of-day string (e.g., <c>"13:30:00"</c>)
+        /// into a <see cref="TimeSpan"/>. Returns null on parse failure
+        /// or whitespace input. The Vue layer's <c>&lt;TimePicker&gt;</c>
+        /// emits this format.
+        /// </summary>
+        private static TimeSpan? ParseTimeSpanOrNull( string isoTime )
+        {
+            if ( isoTime.IsNullOrWhiteSpace() )
+            {
+                return null;
+            }
+
+            return TimeSpan.TryParse( isoTime, out var ts ) ? ts : ( TimeSpan? ) null;
+        }
+
+        /// <summary>
+        /// Builds the Group Type dropdown payload for the Add panel. Uses
+        /// the entity's parent group type (when known) as the "parent"
+        /// filter argument so the dropdown only contains group types the
+        /// parent allows as children.
+        /// </summary>
+        private List<ListItemBag> BuildAllowedGroupTypeListItems( Model.Group entity )
+        {
+            var parentGroupType = entity?.ParentGroup != null
+                ? GroupTypeCache.Get( entity.ParentGroup.GroupTypeId )
+                : null;
+
+            return GetAllowedGroupTypes( parentGroupType, RockContext )
+                .OrderBy( gt => gt.Order )
+                .ThenBy( gt => gt.Name )
+                .Select( gt => new { gt.Id, gt.Name } )
+                .ToList()
+                .Select( gt => new ListItemBag
+                {
+                    Value = gt.Id.ToString(),
+                    Text = gt.Name
+                } )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Builds the Required Signature Document dropdown payload.
+        /// Returns active templates plus the currently-bound template (if
+        /// any) so an existing group bound to a deactivated template still
+        /// surfaces its current value. Mirrors the post-modernization
+        /// pattern at <c>RegistrationTemplateDetail.ascx.cs:2983</c>.
+        /// </summary>
+        private List<ListItemBag> BuildSignatureDocumentTemplateListItems( Model.Group entity )
+        {
+            var currentTemplateId = entity?.RequiredSignatureDocumentTemplateId;
+
+            return new SignatureDocumentTemplateService( RockContext )
+                .Queryable()
+                .Where( t => t.IsActive || t.Id == currentTemplateId )
+                .OrderBy( t => t.Name )
+                .Select( t => new { t.Id, t.Name } )
+                .ToList()
+                .Select( t => new ListItemBag
+                {
+                    Value = t.Id.ToString(),
+                    Text = t.Name
+                } )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Returns the <see cref="GroupType"/> queryable filtered by the
+        /// block's <c>GroupTypes</c> / <c>GroupTypesExclude</c>
+        /// attributes, the parent group's allowed child group types,
+        /// the <c>LimittoSecurityRoleGroups</c> attribute, and the
+        /// <c>LimitToShowInNavigationGroupTypes</c> attribute. Mirrors
+        /// the WebForms helper at
+        /// <c>GroupDetail.ascx.cs:2939-2976</c>.
+        /// </summary>
+        /// <remarks>
+        /// 5/9/2026 - CLAUDE
+        ///
+        /// Within a single page-load this is invoked from
+        /// <see cref="BuildAllowedGroupTypeListItems"/>; within a single
+        /// Save it's invoked from validation gate 5; for the Add-from-
+        /// tree path <see cref="ApplyNewGroupDefaultValues"/> also calls
+        /// it (and within that loop, hits <see cref="Model.Group.IsAuthorized"/>
+        /// once per allowed type). Each call is a fresh DB query — the
+        /// cache-backed <c>GroupTypeCache.Get</c> calls inside the
+        /// authorization probe minimize the per-iteration cost.
+        ///
+        /// Per-request memoization (similar to <c>_cachedGroupType</c>)
+        /// is the natural future optimization if profiling shows this
+        /// in the hot path. Keyed by <c>parentGroupGroupType?.Id</c>.
+        ///
+        /// Reason: keep the queryable signature simple; memoization is
+        /// available if needed but not yet justified.
+        /// </remarks>
+        private IQueryable<Model.GroupType> GetAllowedGroupTypes( GroupTypeCache parentGroupGroupType, RockContext rockContext )
+        {
+            var groupTypeService = new GroupTypeService( rockContext );
+            var groupTypeQry = groupTypeService.Queryable();
+
+            // Block attribute include/exclude.
+            var includeGuids = GetAttributeValue( AttributeKey.GroupTypes ).SplitDelimitedValues().AsGuidList();
+            var excludeGuids = GetAttributeValue( AttributeKey.GroupTypesExclude ).SplitDelimitedValues().AsGuidList();
+            if ( includeGuids.Any() )
+            {
+                groupTypeQry = groupTypeQry.Where( a => includeGuids.Contains( a.Guid ) );
+            }
+            else if ( excludeGuids.Any() )
+            {
+                groupTypeQry = groupTypeQry.Where( a => !excludeGuids.Contains( a.Guid ) );
+            }
+
+            // Parent group type's allowed child group types.
+            if ( parentGroupGroupType != null && !parentGroupGroupType.AllowAnyChildGroupType )
+            {
+                var allowedChildGroupTypeIds = parentGroupGroupType.ChildGroupTypes.Select( a => a.Id ).ToList();
+                groupTypeQry = groupTypeQry.Where( a => allowedChildGroupTypeIds.Contains( a.Id ) );
+            }
+
+            // LimitToShowInNavigationGroupTypes.
+            if ( GetAttributeValue( AttributeKey.LimitToShowInNavigationGroupTypes ).AsBoolean() )
+            {
+                groupTypeQry = groupTypeQry.Where( a => a.ShowInNavigation );
+            }
+
+            // LimittoSecurityRoleGroups.
+            if ( GetAttributeValue( AttributeKey.LimittoSecurityRoleGroups ).AsBoolean() )
+            {
+                var securityRoleGroupTypeId = GroupTypeCache.GetId( Rock.SystemGuid.GroupType.GROUPTYPE_SECURITY_ROLE.AsGuid() );
+                if ( securityRoleGroupTypeId.HasValue )
+                {
+                    groupTypeQry = groupTypeQry.Where( a => a.Id == securityRoleGroupTypeId.Value );
+                }
+            }
+
+            return groupTypeQry;
+        }
+
+        /// <summary>
+        /// Resolves <see cref="GroupTypeOptionsBag"/> for the supplied
+        /// group type id. The Vue side calls this on each cascade.
+        /// Mirrors the WebForms <c>ShowGroupTypeEditDetails</c>
+        /// rebinding at <c>GroupDetail.ascx.cs:2173-2295</c> but emits
+        /// a typed bag instead of mutating UI state.
+        /// </summary>
+        private GroupTypeOptionsBag BuildGroupTypeOptionsBag( int groupTypeId )
+        {
+            var bag = new GroupTypeOptionsBag
+            {
+                StatusValues = new List<ListItemBag>(),
+                InactiveReasons = new List<ListItemBag>(),
+                InheritedMemberAttributes = new List<PublicAttributeBag>()
+            };
+
+            if ( groupTypeId <= 0 )
+            {
+                return bag;
+            }
+
+            var groupType = GroupTypeCache.Get( groupTypeId );
+            if ( groupType == null )
+            {
+                return bag;
+            }
+
+            // Visibility flags.
+            bag.IsRsvpSectionVisible = groupType.EnableRSVP;
+            bag.IsChatSectionVisible = ChatHelper.IsChatEnabled && groupType.IsChatAllowed;
+            bag.IsSchedulingSectionVisible = ( groupType.AllowedScheduleTypes & ( ScheduleType.Weekly | ScheduleType.Custom | ScheduleType.Named ) ) != 0;
+            bag.IsPeerNetworkSectionVisible = groupType.IsPeerNetworkEnabled;
+            bag.IsAdministratorVisible = groupType.ShowAdministrator;
+            bag.IsGroupSpecificRecordSourceVisible = groupType.AllowGroupSpecificRecordSource;
+            bag.IsScheduleConfirmationLogicVisible = groupType.IsSchedulingEnabled;
+            bag.IsScheduleCoordinatorVisible = groupType.IsSchedulingEnabled;
+            bag.IsCoordinatorNotificationsVisible = groupType.IsSchedulingEnabled;
+            bag.IsCheckInRequirementsVisible = groupType.TakesAttendance;
+            bag.IsGroupCapacityVisible = groupType.GroupCapacityRule != GroupCapacityRule.None;
+            bag.IsGroupCapacityRequired = groupType.IsCapacityRequired;
+            bag.IsInactiveReasonVisible = groupType.EnableInactiveReason;
+            bag.IsInactiveReasonRequired = groupType.RequiresInactiveReason;
+            bag.IsStatusVisible = groupType.GroupStatusDefinedTypeId.HasValue;
+            bag.RequiresCampus = groupType.GroupsRequireCampus;
+
+            // Allowed flags.
+            bag.AllowedScheduleTypes = groupType.AllowedScheduleTypes;
+            bag.LocationSelectionMode = groupType.LocationSelectionMode;
+            bag.EnableLocationSchedules = groupType.EnableLocationSchedules ?? false;
+            bag.IsSchedulingEnabled = groupType.IsSchedulingEnabled;
+
+            // Localization.
+            bag.AdministratorTerm = groupType.AdministratorTerm.IsNotNullOrWhiteSpace() ? groupType.AdministratorTerm : "Administrator";
+            bag.IconCssClass = groupType.IconCssClass;
+
+            // Peer network defaults / placeholders.
+            bag.RelationshipStrengthDefault = ( RelationshipStrength ) groupType.RelationshipStrength;
+            bag.RelationshipGrowthEnabledDefault = groupType.RelationshipGrowthEnabled;
+            bag.LeaderToLeaderMultiplierDefault = groupType.LeaderToLeaderRelationshipMultiplier;
+            bag.LeaderToNonLeaderMultiplierDefault = groupType.LeaderToNonLeaderRelationshipMultiplier;
+            bag.NonLeaderToLeaderMultiplierDefault = groupType.NonLeaderToLeaderRelationshipMultiplier;
+            bag.NonLeaderToNonLeaderMultiplierDefault = groupType.NonLeaderToNonLeaderRelationshipMultiplier;
+
+            // RSVP pinned values (group-type wins; null = group can override).
+            bag.RsvpReminderOffsetDays = groupType.RSVPReminderOffsetDays;
+            if ( groupType.RSVPReminderSystemCommunicationId.HasValue )
+            {
+                bag.RsvpReminderSystemCommunicationGuid = new SystemCommunicationService( RockContext )
+                    .GetSelect( groupType.RSVPReminderSystemCommunicationId.Value, c => ( Guid? ) c.Guid );
+            }
+
+            // Status defined values.
+            if ( groupType.GroupStatusDefinedTypeId.HasValue )
+            {
+                var definedType = DefinedTypeCache.Get( groupType.GroupStatusDefinedTypeId.Value );
+                if ( definedType != null )
+                {
+                    bag.StatusValues = definedType.DefinedValues
+                        .Where( dv => dv.IsActive )
+                        .OrderBy( dv => dv.Order )
+                        .Select( dv => new ListItemBag
+                        {
+                            Value = dv.Id.ToString(),
+                            Text = dv.Value
+                        } )
+                        .ToList();
+                }
+            }
+
+            // Inactive reasons.
+            if ( groupType.EnableInactiveReason )
+            {
+                bag.InactiveReasons = new GroupTypeService( RockContext )
+                    .GetInactiveReasonsForGroupType( groupType.Id )
+                    .Select( dv => new ListItemBag
+                    {
+                        Value = dv.Id.ToString(),
+                        Text = dv.Value
+                    } )
+                    .ToList();
+            }
+
+            return bag;
         }
 
         /// <summary>

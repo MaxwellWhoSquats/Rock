@@ -22,6 +22,7 @@
 //
 
 import { Guid } from "@Obsidian/Types";
+import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 
 /**
  * Per-block options consumed by the Group Detail Vue layer. Carries
@@ -32,6 +33,16 @@ import { Guid } from "@Obsidian/Types";
  * IdKey policy).
  */
 export type GroupDetailOptionsBag = {
+    /**
+     * Gets or sets the list of GroupTypes the user is allowed to
+     * pick on the Add panel's Group Type dropdown. Filtered by the
+     * block's GroupTypes / GroupTypesExclude attributes,
+     * the parent group's allowed child group types,
+     * LimittoSecurityRoleGroups, and
+     * LimitToShowInNavigationGroupTypes (per Phase 3 B1 / B2).
+     */
+    allowedGroupTypes?: ListItemBag[] | null;
+
     /**
      * Gets or sets a value indicating whether the Archive button is
      * visible in place of Delete. Mirrors the WebForms condition:
@@ -111,15 +122,23 @@ export type GroupDetailOptionsBag = {
     isTagListShown: boolean;
 
     /**
-     * Gets or sets the resolved Rock.SystemGuid.DefinedValue
-     * Guid of the MapStyle block attribute. Passed to the Vue
-     * map renderer (locationCard.partial.obs) so
-     * loadMapResources from @Obsidian/Utility/geo can
-     * fetch the matching map-style settings via the geo-picker REST
-     * endpoint. Null when the block setting is unset, which falls
-     * back to the default Rock map style on the client.
+     * Gets or sets the resolved DefinedValue Guid of the
+     * MapStyle block attribute. Passed to the Vue map renderer
+     * (locationCard.partial.obs) so loadMapResources
+     * from @Obsidian/Utility/geo can fetch the matching
+     * map-style settings via the geo-picker REST endpoint. Null when
+     * the block setting is unset, which falls back to the default
+     * Rock map style on the client.
      */
     mapStyleValueGuid?: Guid | null;
+
+    /**
+     * Gets or sets a value indicating whether the
+     * PreventSelectingInactiveCampus block attribute is set,
+     * surfaced so the edit panel can pass !IncludeInactive to
+     * &lt;CampusPicker&gt; (per Phase 3 B5).
+     */
+    preventSelectingInactiveCampus: boolean;
 
     /**
      * Gets or sets a value indicating whether the Delete button is
@@ -127,4 +146,12 @@ export type GroupDetailOptionsBag = {
      * enabled and at least one history row exists).
      */
     shouldShowArchiveInsteadOfDelete: boolean;
+
+    /**
+     * Gets or sets the list of signature document templates available
+     * for the "Required Signature Document" dropdown. Sourced from
+     * SignatureDocumentTemplateService.GetLegacyTemplates()
+     * (per Phase 3 C3 / webforms/05).
+     */
+    signatureDocumentTemplates?: ListItemBag[] | null;
 };

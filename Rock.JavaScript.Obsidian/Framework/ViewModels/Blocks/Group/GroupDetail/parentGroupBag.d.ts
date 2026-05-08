@@ -22,23 +22,34 @@
 //
 
 /**
- * Reference to the group's parent group surfaced in the Overview
- * card. Carries the parent's friendly name and a server-resolved
- * link URL. The URL prefers the Group EntityType.LinkUrlLavaTemplate
- * (so customer-customized link rules are honored) and falls back to
- * /Group/{IdKey}.
+ * Reference to the group's parent group. Inherited Value
+ * carries the parent group Id (as a string) and Text carries
+ * the parent's friendly name; the picker-shaped base lets the
+ * edit-mode &lt;GroupPicker&gt; bind to the same field. The
+ * view-mode Overview card additionally renders a link using the
+ * pre-resolved Url, which prefers the Group
+ * EntityType.LinkUrlLavaTemplate (so customer-customized
+ * link rules are honored) and falls back to /Group/{IdKey}.
  */
 export type ParentGroupBag = {
-    /**
-     * Gets or sets the parent group's friendly name. Rendered as
-     * the link text.
-     */
-    name?: string | null;
+    /** Gets or sets the category for this item. */
+    category?: string | null;
+
+    /** Gets or sets disabled for this item. */
+    disabled?: boolean | null;
+
+    /** Gets or sets the text. */
+    text?: string | null;
 
     /**
      * Gets or sets the pre-resolved detail URL. Null / empty when
-     * no link can be constructed; the Vue layer falls through to
-     * rendering the name as plain text.
+     * no link can be constructed (also during edit-mode emits, where
+     * the picker overwrites Value/Text without a URL);
+     * the Vue layer falls through to rendering the name as plain
+     * text in either case.
      */
     url?: string | null;
+
+    /** Gets or sets the value. */
+    value?: string | null;
 };

@@ -21,17 +21,17 @@
 // </copyright>
 //
 
-import { Guid } from "@Obsidian/Types";
 import { GroupLocationPickerMode } from "@Obsidian/Enums/Group/groupLocationPickerMode";
+import { Guid } from "@Obsidian/Types";
 
 /**
  * One Meeting Location card on the right rail of the Group Detail
  * view panel. Each GroupLocation on the group renders as one
  * instance of this bag in GroupBag.MeetingLocations. The Vue
  * layer renders the variants (Address / Point / Polygon / GroupMember)
- * from the Mode field. See Phase 2 spec section C2 for
+ * from the Rock.ViewModels.Blocks.Group.GroupDetail.GroupMeetingLocationBag.Mode field. See Phase 2 spec section C2 for
  * the full field contract and Q2.5 for the WKT pass-through shape of
- * MapData.
+ * Rock.ViewModels.Blocks.Group.GroupDetail.GroupMeetingLocationBag.MapData.
  */
 export type GroupMeetingLocationBag = {
     /**
@@ -52,7 +52,8 @@ export type GroupMeetingLocationBag = {
      * v-for key on the location list. Phase 6's editing modal
      * will use this Guid to identify rows in the in-progress state
      * collection (matching the WebForms hfGroupLocationGuid
-     * pattern); new unsaved rows will be created with crypto.randomUUID().
+     * pattern at research/webforms/07-locations-and-schedules.md);
+     * new unsaved rows will be created with Guid.NewGuid().
      */
     guid: Guid;
 

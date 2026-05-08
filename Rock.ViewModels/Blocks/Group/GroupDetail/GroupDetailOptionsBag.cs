@@ -16,6 +16,9 @@
 //
 
 using System;
+using System.Collections.Generic;
+
+using Rock.ViewModels.Utility;
 
 namespace Rock.ViewModels.Blocks.Group.GroupDetail
 {
@@ -134,6 +137,36 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// Rock map style on the client.
         /// </summary>
         public Guid? MapStyleValueGuid { get; set; }
+
+        #endregion
+
+        #region Edit-mode supporting collections (Phase 3)
+
+        /// <summary>
+        /// Gets or sets the list of GroupTypes the user is allowed to
+        /// pick on the Add panel's Group Type dropdown. Filtered by the
+        /// block's <c>GroupTypes</c> / <c>GroupTypesExclude</c> attributes,
+        /// the parent group's allowed child group types,
+        /// <c>LimittoSecurityRoleGroups</c>, and
+        /// <c>LimitToShowInNavigationGroupTypes</c> (per Phase 3 B1 / B2).
+        /// </summary>
+        public List<ListItemBag> AllowedGroupTypes { get; set; }
+
+        /// <summary>
+        /// Gets or sets the list of signature document templates available
+        /// for the "Required Signature Document" dropdown. Sourced from
+        /// <c>SignatureDocumentTemplateService.GetLegacyTemplates()</c>
+        /// (per Phase 3 C3 / webforms/05).
+        /// </summary>
+        public List<ListItemBag> SignatureDocumentTemplates { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the
+        /// <c>PreventSelectingInactiveCampus</c> block attribute is set,
+        /// surfaced so the edit panel can pass <c>!IncludeInactive</c> to
+        /// <c>&lt;CampusPicker&gt;</c> (per Phase 3 B5).
+        /// </summary>
+        public bool PreventSelectingInactiveCampus { get; set; }
 
         #endregion
     }

@@ -1,24 +1,946 @@
 <!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
 <template>
-    <NotificationBox alertType="info">
-        <strong>Edit panel coming in Phase 2.</strong>
-        Click Cancel to return to view mode.
-    </NotificationBox>
+    <fieldset>
+        <NotificationBox v-if="errorMessage" alertType="danger" v-html="errorMessage" />
 
-    <div class="actions">
-        <RockButton btnType="link" @click="onCancel">Cancel</RockButton>
-    </div>
+        <!-- ========================== -->
+        <!-- Section 1 - Top fields -->
+        <!-- ========================== -->
+        <ContentSection title="Group Details" description="The basic identity of the group.">
+            <ContentStack title="Name and Description" description="A clear name and a short description help members find and recognize the group.">
+                <TextBox v-model="name"
+                         label="Name"
+                         rules="required"
+                         :maxLength="100" />
+
+                <TextBox v-model="description"
+                         label="Description"
+                         textMode="multiline"
+                         :rows="4" />
+
+                <CheckBox v-model="isActive"
+                          label="Active"
+                          help="Inactive groups are hidden from most lists and tools." />
+
+                <ConditionalWell v-if="!isActive">
+                    <DropDownList v-if="groupTypeOptions.isInactiveReasonVisible"
+                                  v-model="inactiveReasonValueIdValue"
+                                  label="Inactive Reason"
+                                  :items="inactiveReasonItems"
+                                  :rules="groupTypeOptions.isInactiveReasonRequired ? 'required' : ''" />
+
+                    <TextBox v-model="inactiveReasonNote"
+                             label="Inactive Note"
+                             textMode="multiline"
+                             :rows="3" />
+
+                    <CheckBox v-if="hasChildGroups"
+                              v-model="inactivateChildGroups"
+                              label="Also Inactivate Child Groups"
+                              help="When checked, all active descendants are marked inactive on save." />
+                </ConditionalWell>
+
+                <CheckBox v-model="isPublic" label="Show Publicly" />
+            </ContentStack>
+
+            <ContentStack title="Group Image" description="A 16:9 image used as the hero on the view panel.">
+                <ImageUploader v-model="photoBinaryFile"
+                               label="Image"
+                               :binaryFileTypeGuid="binaryFileTypeDefault" />
+            </ContentStack>
+        </ContentSection>
+
+        <!-- ========================== -->
+        <!-- Section 2 - General -->
+        <!-- ========================== -->
+        <ContentSection title="General"
+                        description="Type, hierarchy, capacity, security, and peer-network behavior.">
+
+            <!-- Stack 1 - Overview -->
+            <ContentStack title="Overview" description="Group type, parent, campus, and status.">
+                <DropDownList v-if="isAddMode"
+                              v-model="groupTypeIdValue"
+                              label="Group Type"
+                              :items="allowedGroupTypeItems"
+                              rules="required"
+                              :showBlankItem="true" />
+                <StaticFormControl v-else
+                                   label="Group Type"
+                                   :modelValue="modelValue.bag?.groupType?.name ?? ''" />
+
+                <GroupPicker v-model="parentGroup"
+                             label="Parent Group" />
+
+                <CampusPicker v-model="campus"
+                              label="Campus"
+                              :includeInactive="!preventSelectingInactiveCampus"
+                              :rules="groupTypeOptions.requiresCampus ? 'required' : ''" />
+
+                <DropDownList v-if="groupTypeOptions.isStatusVisible"
+                              v-model="statusValueIdValue"
+                              label="Status"
+                              :items="statusItems" />
+            </ContentStack>
+
+            <!-- Stack 2 - Administration & Security -->
+            <ContentStack title="Administration &amp; Security" description="Administrator, capacity, signature document, record source, and security role.">
+                <PersonPicker v-if="groupTypeOptions.isAdministratorVisible"
+                              v-model="groupAdministrator"
+                              :label="groupTypeOptions.administratorTerm || 'Administrator'"
+                              :trailblazerField="true" />
+
+                <NumberBox v-if="groupTypeOptions.isGroupCapacityVisible"
+                           v-model="groupCapacity"
+                           label="Group Capacity"
+                           help="Maximum number of members for this group."
+                           :rules="groupTypeOptions.isGroupCapacityRequired ? 'required' : ''">
+                    <template #append>
+                        <span class="input-group-addon">Members</span>
+                    </template>
+                </NumberBox>
+
+                <DropDownList v-model="requiredSignatureDocumentTemplateIdValue"
+                              label="Required Signature Document"
+                              :items="signatureDocumentTemplateItems"
+                              :showBlankItem="true"
+                              :trailblazerField="true" />
+
+                <DefinedValuePicker v-if="groupTypeOptions.isGroupSpecificRecordSourceVisible"
+                                    v-model="recordSourceValue"
+                                    label="Member Record Source"
+                                    help="The default record source assigned to new members of this group."
+                                    :definedTypeGuid="recordSourceDefinedTypeGuid"
+                                    :trailblazerField="true" />
+
+                <CheckBox v-if="isCurrentPersonGroupAdministrator"
+                          v-model="isSecurityRole"
+                          label="Enable as Security Role"
+                          :disabled="isLimitedToSecurityRoleGroups" />
+
+                <ConditionalWell v-if="isSecurityRole">
+                    <RadioButtonList v-model="elevatedSecurityLevelValue"
+                                     label="Security Level"
+                                     :items="elevatedSecurityLevelItems"
+                                     horizontal />
+                </ConditionalWell>
+            </ContentStack>
+
+            <!-- Stack 3 - Relationships -->
+            <ContentStack v-if="groupTypeOptions.isPeerNetworkSectionVisible"
+                          title="Relationships"
+                          description="Override how this group contributes to the peer-network strength matrix.">
+                <CheckBox v-model="overrideRelationshipStrength"
+                          label="Override Relationship Strength" />
+
+                <ConditionalWell v-if="overrideRelationshipStrength">
+                    <RadioButtonList v-model="relationshipStrengthOverrideValue"
+                                     label="Relationship Strength"
+                                     :items="relationshipStrengthItems"
+                                     horizontal />
+
+                    <CheckBox v-if="(relationshipStrengthOverride ?? 0) !== 0"
+                              v-model="relationshipGrowthEnabledOverride"
+                              label="Enable Relationship Growth Over Time"
+                              help="Allow the strength of this group's relationships to increase over time." />
+
+                    <InlineSwitch v-if="(relationshipStrengthOverride ?? 0) !== 0"
+                                  v-model="showAdvancedRelationshipSettings"
+                                  label="Show Advanced Relationship Settings"
+                                  :trailblazerField="true" />
+
+                    <ConditionalWell v-if="showAdvancedRelationshipSettings && (relationshipStrengthOverride ?? 0) !== RelationshipStrength.None">
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <NumberBox v-model="leaderToLeaderRelationshipMultiplierOverrideValue"
+                                           label="Leader to Leader"
+                                           :placeholder="formatPercent(groupTypeOptions.leaderToLeaderMultiplierDefault)"
+                                           :minimumValue="0"
+                                           :maximumValue="100"
+                                           :decimalCount="2"
+                                           :trailblazerField="true">
+                                    <template #append>
+                                        <span class="input-group-addon">%</span>
+                                    </template>
+                                </NumberBox>
+                            </div>
+                            <div class="col-sm-6">
+                                <NumberBox v-model="leaderToNonLeaderRelationshipMultiplierOverrideValue"
+                                           label="Leader to Non-Leader"
+                                           :placeholder="formatPercent(groupTypeOptions.leaderToNonLeaderMultiplierDefault)"
+                                           :minimumValue="0"
+                                           :maximumValue="100"
+                                           :decimalCount="2"
+                                           :trailblazerField="true">
+                                    <template #append>
+                                        <span class="input-group-addon">%</span>
+                                    </template>
+                                </NumberBox>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <NumberBox v-model="nonLeaderToLeaderRelationshipMultiplierOverrideValue"
+                                           label="Non-Leader to Leader"
+                                           :placeholder="formatPercent(groupTypeOptions.nonLeaderToLeaderMultiplierDefault)"
+                                           :minimumValue="0"
+                                           :maximumValue="100"
+                                           :decimalCount="2"
+                                           :trailblazerField="true">
+                                    <template #append>
+                                        <span class="input-group-addon">%</span>
+                                    </template>
+                                </NumberBox>
+                            </div>
+                            <div class="col-sm-6">
+                                <NumberBox v-model="nonLeaderToNonLeaderRelationshipMultiplierOverrideValue"
+                                           label="Non-Leader to Non-Leader"
+                                           :placeholder="formatPercent(groupTypeOptions.nonLeaderToNonLeaderMultiplierDefault)"
+                                           :minimumValue="0"
+                                           :maximumValue="100"
+                                           :decimalCount="2"
+                                           :trailblazerField="true">
+                                    <template #append>
+                                        <span class="input-group-addon">%</span>
+                                    </template>
+                                </NumberBox>
+                            </div>
+                        </div>
+                    </ConditionalWell>
+                </ConditionalWell>
+            </ContentStack>
+        </ContentSection>
+
+        <!-- ========================== -->
+        <!-- Section 3 - RSVP -->
+        <!-- ========================== -->
+        <ContentSection v-if="groupTypeOptions.isRsvpSectionVisible"
+                        title="RSVP"
+                        description="Reminder communication and lead time for group RSVPs.">
+            <ContentStack>
+                <NumberBox v-model="rsvpReminderOffsetDays"
+                           label="RSVP Reminder Lead Time"
+                           help="How many days before an event to send the reminder."
+                           :disabled="groupTypeOptions.rsvpReminderOffsetDays != null"
+                           :minimumValue="0">
+                    <template #append>
+                        <span class="input-group-addon">Days</span>
+                    </template>
+                </NumberBox>
+                <NotificationBox v-if="groupTypeOptions.rsvpReminderOffsetDays != null" alertType="info">
+                    The Group Type pins this value; the override is locked.
+                </NotificationBox>
+                <NotificationBox v-if="groupTypeOptions.rsvpReminderSystemCommunicationGuid != null" alertType="info">
+                    The Group Type pins the RSVP Reminder Communication; the override is locked.
+                </NotificationBox>
+            </ContentStack>
+        </ContentSection>
+
+        <!-- ========================== -->
+        <!-- Section 4 - Scheduling -->
+        <!-- ========================== -->
+        <ContentSection v-if="groupTypeOptions.isSchedulingSectionVisible || groupTypeOptions.isSchedulingEnabled"
+                        title="Scheduling"
+                        description="Schedule, scheduling preferences, and check-in.">
+
+            <!-- Stack 1 - Overall Group Schedule -->
+            <ContentStack v-if="groupTypeOptions.isSchedulingSectionVisible"
+                          title="Overall Group Schedule"
+                          description="When the group regularly meets.">
+                <RadioButtonList v-model="scheduleTypeValue"
+                                 label="Schedule Type"
+                                 :items="scheduleTypeItems"
+                                 horizontal />
+
+                <div v-if="scheduleType === scheduleTypeWeekly">
+                    <DayOfWeekPicker v-model="weeklyDayOfWeekValue" label="Day of Week" />
+                    <TimePicker v-model="weeklyTimeOfDayValue" label="Time" />
+                </div>
+
+                <ScheduleBuilder v-if="scheduleType === scheduleTypeCustom"
+                                 v-model="iCalendarContent"
+                                 label="Custom Schedule" />
+
+                <SchedulePicker v-if="scheduleType === scheduleTypeNamed"
+                                v-model="namedSchedule"
+                                label="Named Schedule" />
+            </ContentStack>
+
+            <!-- Stack 2 - Locations placeholder (Phase 6) -->
+            <ContentStack v-if="groupTypeOptions.isSchedulingEnabled"
+                          title="Locations"
+                          description="Where this group meets.">
+                <NotificationBox alertType="info">
+                    Locations editing arrives in Phase 6. The view panel already renders the read-only Meeting Locations card.
+                </NotificationBox>
+            </ContentStack>
+
+            <!-- Stack 3 - Member Scheduling & Check-in -->
+            <ContentStack v-if="groupTypeOptions.isSchedulingEnabled || groupTypeOptions.isCheckInRequirementsVisible"
+                          title="Member Scheduling &amp; Check-in"
+                          description="Scheduling permissions, coordinator notifications, and check-in behavior.">
+                <CheckBox v-model="disableScheduling"
+                          label="Disable Group Member Scheduling" />
+
+                <CheckBox v-model="disableScheduleToolboxAccess"
+                          label="Hide from Schedule Toolbox" />
+
+                <CheckBox v-model="schedulingMustMeetRequirements"
+                          label="Require Member Requirements for Scheduling" />
+
+                <DropDownList v-if="groupTypeOptions.isScheduleConfirmationLogicVisible"
+                              v-model="scheduleConfirmationLogicValue"
+                              label="Confirmation Behavior"
+                              :items="scheduleConfirmationLogicItems"
+                              :showBlankItem="true" />
+
+                <PersonPicker v-if="groupTypeOptions.isScheduleCoordinatorVisible"
+                              v-model="scheduleCoordinatorPerson"
+                              label="Schedule Coordinator" />
+
+                <div v-if="groupTypeOptions.isCoordinatorNotificationsVisible">
+                    <CheckBoxList v-model="scheduleCoordinatorNotificationTypesValue"
+                                  label="Coordinator Notifications"
+                                  help="Empty = none. Selecting any combination toggles only those notifications."
+                                  :items="coordinatorNotificationItems"
+                                  horizontal />
+                </div>
+
+                <RadioButtonList v-if="groupTypeOptions.isCheckInRequirementsVisible"
+                                 v-model="attendanceRecordRequiredForCheckInValue"
+                                 label="Who Can Check-in"
+                                 :items="attendanceRecordRequiredForCheckInItems" />
+            </ContentStack>
+        </ContentSection>
+
+        <!-- ========================== -->
+        <!-- Sections 5 / 6 / 7 - placeholders -->
+        <!-- ========================== -->
+        <ContentSection title="Group Attributes" description="Custom field values defined on the group type.">
+            <NotificationBox alertType="info">Coming in Phase 4.</NotificationBox>
+        </ContentSection>
+
+        <ContentSection title="Group Member Attributes" description="Per-group attribute definitions used by every member.">
+            <NotificationBox alertType="info">Coming in Phase 4.</NotificationBox>
+        </ContentSection>
+
+        <ContentSection title="Group Requirements" description="Requirements every member must meet.">
+            <NotificationBox alertType="info">Coming in Phase 5.</NotificationBox>
+        </ContentSection>
+
+        <!-- ========================== -->
+        <!-- Section 8 - Chat -->
+        <!-- ========================== -->
+        <ContentSection v-if="groupTypeOptions.isChatSectionVisible"
+                        title="Chat"
+                        description="Chat channel settings for this group.">
+            <ContentStack>
+                <RadioButtonList v-model="isChatEnabledOverrideValue"
+                                 label="Enable Chat"
+                                 :items="triStateOverrideItems"
+                                 horizontal />
+                <RadioButtonList v-model="isLeavingChatChannelAllowedOverrideValue"
+                                 label="Allow Members to Leave Channel"
+                                 :items="triStateOverrideItems"
+                                 horizontal />
+                <RadioButtonList v-model="isChatChannelPublicOverrideValue"
+                                 label="Public Channel"
+                                 :items="triStateOverrideItems"
+                                 horizontal />
+                <RadioButtonList v-model="isChatChannelAlwaysShownOverrideValue"
+                                 label="Always Show"
+                                 :items="triStateOverrideItems"
+                                 horizontal />
+                <DropDownList v-model="chatPushNotificationModeOverrideValue"
+                              label="Push Notification Mode"
+                              :items="chatPushNotificationModeItems"
+                              :showBlankItem="true" />
+
+                <ImageUploader v-model="chatChannelAvatarBinaryFile"
+                               label="Chat Channel Avatar"
+                               :binaryFileTypeGuid="binaryFileTypeDefault"
+                               :disabled="isSystem" />
+            </ContentStack>
+        </ContentSection>
+
+        <!-- ========================== -->
+        <!-- Sections 9 / 10 - placeholders -->
+        <!-- ========================== -->
+        <ContentSection title="Group Sync" description="Automatic membership sync from a Data View.">
+            <NotificationBox alertType="info">Coming in Phase 5.</NotificationBox>
+        </ContentSection>
+
+        <ContentSection title="Group Member Workflows" description="Workflows triggered by member events.">
+            <NotificationBox alertType="info">Coming in Phase 5.</NotificationBox>
+        </ContentSection>
+    </fieldset>
 </template>
 
+<style scoped>
+/* Phase 3 has no per-block style overrides; ContentSection / ContentStack /
+   ConditionalWell handle layout entirely. */
+</style>
+
 <script setup lang="ts">
+    import { computed, PropType, ref, watch } from "vue";
+    import { BinaryFiletype } from "@Obsidian/SystemGuids/binaryFiletype";
+    import { DefinedType as DefinedTypeGuid } from "@Obsidian/SystemGuids/definedType";
+    import { ScheduleType, ScheduleTypeDescription } from "@Obsidian/Enums/Group/scheduleType";
+    import { RelationshipStrength, RelationshipStrengthDescription } from "@Obsidian/Enums/Group/relationshipStrength";
+    import { ScheduleConfirmationLogic, ScheduleConfirmationLogicDescription } from "@Obsidian/Enums/Group/scheduleConfirmationLogic";
+    import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
+    import { AttendanceRecordRequiredForCheckIn, AttendanceRecordRequiredForCheckInDescription } from "@Obsidian/Enums/Group/attendanceRecordRequiredForCheckIn";
+    import { ElevatedSecurityLevel, ElevatedSecurityLevelDescription } from "@Obsidian/Enums/Security/elevatedSecurityLevel";
+    import { ChatNotificationMode, ChatNotificationModeDescription } from "@Obsidian/Enums/Communication/Chat/chatNotificationMode";
+    import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { TimePickerValue } from "@Obsidian/ViewModels/Controls/timePickerValue";
+    import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
+    import { GroupTypeOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag";
+    import { ValidPropertiesBox } from "@Obsidian/ViewModels/Utility/validPropertiesBox";
+    import { setPropertiesBoxValue, watchPropertyChanges } from "@Obsidian/Utility/block";
+    import { propertyRef, updateRefValue } from "@Obsidian/Utility/component";
+
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
-    import RockButton from "@Obsidian/Controls/rockButton.obs";
+    import ContentSection from "@Obsidian/Controls/contentSection.obs";
+    import ContentStack from "@Obsidian/Controls/contentStack.obs";
+    import ConditionalWell from "@Obsidian/Controls/conditionalWell.obs";
+    import TextBox from "@Obsidian/Controls/textBox.obs";
+    import CheckBox from "@Obsidian/Controls/checkBox.obs";
+    import CheckBoxList from "@Obsidian/Controls/checkBoxList.obs";
+    import InlineSwitch from "@Obsidian/Controls/inlineSwitch.obs";
+    import DropDownList from "@Obsidian/Controls/dropDownList.obs";
+    import RadioButtonList from "@Obsidian/Controls/radioButtonList.obs";
+    import StaticFormControl from "@Obsidian/Controls/staticFormControl.obs";
+    import GroupPicker from "@Obsidian/Controls/groupPicker.obs";
+    import CampusPicker from "@Obsidian/Controls/campusPicker.obs";
+    import PersonPicker from "@Obsidian/Controls/personPicker.obs";
+    import NumberBox from "@Obsidian/Controls/numberBox.obs";
+    import DefinedValuePicker from "@Obsidian/Controls/definedValuePicker.obs";
+    import ImageUploader from "@Obsidian/Controls/imageUploader.obs";
+    import DayOfWeekPicker from "@Obsidian/Controls/dayOfWeekPicker.obs";
+    import TimePicker from "@Obsidian/Controls/timePicker.obs";
+    import ScheduleBuilder from "@Obsidian/Controls/scheduleBuilder.obs";
+    import SchedulePicker from "@Obsidian/Controls/schedulePicker.obs";
+    import { combineFlagValues, extractFlagValues, formatPercent, formatTimeValue, intToPercent, nullableInt, parseTimeString, percentToInt, stringToTriState, triStateToString } from "./utils.partial";
+
+    const props = defineProps({
+        modelValue: {
+            type: Object as PropType<ValidPropertiesBox<GroupBag>>,
+            required: true
+        },
+        groupTypeOptions: {
+            type: Object as PropType<GroupTypeOptionsBag>,
+            required: true
+        },
+        allowedGroupTypes: {
+            type: Array as PropType<ListItemBag[]>,
+            default: () => [] as ListItemBag[]
+        },
+        signatureDocumentTemplates: {
+            type: Array as PropType<ListItemBag[]>,
+            default: () => [] as ListItemBag[]
+        },
+        preventSelectingInactiveCampus: {
+            type: Boolean,
+            default: false
+        },
+        errorMessage: {
+            type: String,
+            default: ""
+        }
+    });
 
     const emit = defineEmits<{
-        (e: "cancel"): void;
+        (e: "update:modelValue", value: ValidPropertiesBox<GroupBag>): void;
+        (e: "propertyChanged", value: string): void;
     }>();
 
-    function onCancel(): void {
-        emit("cancel");
-    }
+    // #region Constants
+
+    const binaryFileTypeDefault = BinaryFiletype.Default;
+    const recordSourceDefinedTypeGuid = DefinedTypeGuid.RecordSourceType;
+    const scheduleTypeWeekly = ScheduleType.Weekly;
+    const scheduleTypeCustom = ScheduleType.Custom;
+    const scheduleTypeNamed = ScheduleType.Named;
+
+    // #endregion
+
+    // #region Values
+
+    const bag = computed((): GroupBag => props.modelValue?.bag ?? {} as GroupBag);
+
+    const isAddMode = computed((): boolean => !bag.value.idKey);
+    const isCurrentPersonGroupAdministrator = computed((): boolean => bag.value.isCurrentPersonGroupAdministrator === true);
+    const isLimitedToSecurityRoleGroups = computed((): boolean => bag.value.isLimitedToSecurityRoleGroups === true);
+    const hasChildGroups = computed((): boolean => bag.value.hasChildGroups === true);
+    const isSystem = computed((): boolean => bag.value.isSystem === true);
+
+    const showAdvancedRelationshipSettings = ref(
+        (props.modelValue.bag?.leaderToLeaderRelationshipMultiplierOverride ?? null) !== null
+        || (props.modelValue.bag?.leaderToNonLeaderRelationshipMultiplierOverride ?? null) !== null
+        || (props.modelValue.bag?.nonLeaderToLeaderRelationshipMultiplierOverride ?? null) !== null
+        || (props.modelValue.bag?.nonLeaderToNonLeaderRelationshipMultiplierOverride ?? null) !== null
+    );
+
+    const name = propertyRef(props.modelValue.bag?.name ?? "", "Name");
+    const description = propertyRef(props.modelValue.bag?.description ?? "", "Description");
+    const isActive = propertyRef(props.modelValue.bag?.isActive ?? true, "IsActive");
+    const isPublic = propertyRef(props.modelValue.bag?.isPublic ?? false, "IsPublic");
+    const inactiveReasonValueId = propertyRef<number | null>(props.modelValue.bag?.inactiveReasonValueId ?? null, "InactiveReasonValueId");
+    const inactiveReasonNote = propertyRef(props.modelValue.bag?.inactiveReasonNote ?? "", "InactiveReasonNote");
+    const inactivateChildGroups = propertyRef(props.modelValue.bag?.inactivateChildGroups ?? false, "InactivateChildGroups");
+    const photoBinaryFile = propertyRef<ListItemBag | null>(props.modelValue.bag?.photoBinaryFile ?? null, "PhotoBinaryFile");
+    const groupTypeId = propertyRef<number | null>(props.modelValue.bag?.groupTypeId ?? null, "GroupTypeId");
+    const parentGroup = propertyRef<ListItemBag | null>(props.modelValue.bag?.parentGroup ?? null, "ParentGroup");
+    const campus = propertyRef<ListItemBag | null>(props.modelValue.bag?.campus ?? null, "Campus");
+    const statusValueId = propertyRef<number | null>(props.modelValue.bag?.statusValueId ?? null, "StatusValueId");
+    const groupCapacity = propertyRef<number | null>(props.modelValue.bag?.groupCapacity ?? null, "GroupCapacity");
+    const groupAdministrator = propertyRef<ListItemBag | undefined>(props.modelValue.bag?.administrator ?? undefined, "Administrator");
+    const requiredSignatureDocumentTemplateId = propertyRef<number | null>(props.modelValue.bag?.requiredSignatureDocumentTemplateId ?? null, "RequiredSignatureDocumentTemplateId");
+    const recordSourceValue = propertyRef<ListItemBag | null>(props.modelValue.bag?.groupMemberRecordSource ?? null, "GroupMemberRecordSource");
+    const isSecurityRole = propertyRef(props.modelValue.bag?.isSecurityRole ?? false, "IsSecurityRole");
+    const elevatedSecurityLevel = propertyRef<ElevatedSecurityLevel>(props.modelValue.bag?.elevatedSecurityLevel ?? ElevatedSecurityLevel.None, "ElevatedSecurityLevel");
+    const overrideRelationshipStrength = propertyRef(props.modelValue.bag?.overrideRelationshipStrength ?? false, "OverrideRelationshipStrength");
+    const relationshipStrengthOverride = propertyRef<RelationshipStrength | null>(props.modelValue.bag?.relationshipStrengthOverride ?? null, "RelationshipStrengthOverride");
+    const relationshipGrowthEnabledOverride = propertyRef<boolean>(props.modelValue.bag?.relationshipGrowthEnabledOverride ?? false, "RelationshipGrowthEnabledOverride");
+    const leaderToLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.leaderToLeaderRelationshipMultiplierOverride ?? null, "LeaderToLeaderRelationshipMultiplierOverride");
+    const leaderToNonLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.leaderToNonLeaderRelationshipMultiplierOverride ?? null, "LeaderToNonLeaderRelationshipMultiplierOverride");
+    const nonLeaderToLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.nonLeaderToLeaderRelationshipMultiplierOverride ?? null, "NonLeaderToLeaderRelationshipMultiplierOverride");
+    const nonLeaderToNonLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.nonLeaderToNonLeaderRelationshipMultiplierOverride ?? null, "NonLeaderToNonLeaderRelationshipMultiplierOverride");
+    const rsvpReminderOffsetDays = propertyRef<number | null>(props.modelValue.bag?.rsvpReminderOffsetDays ?? null, "RsvpReminderOffsetDays");
+    const scheduleType = propertyRef<ScheduleType>(props.modelValue.bag?.scheduleType ?? ScheduleType.None, "ScheduleType");
+    const weeklyDayOfWeek = propertyRef<number | null>(props.modelValue.bag?.weeklyDayOfWeek ?? null, "WeeklyDayOfWeek");
+    const weeklyTimeOfDay = propertyRef<string | null>(props.modelValue.bag?.weeklyTimeOfDay ?? null, "WeeklyTimeOfDay");
+    const iCalendarContent = propertyRef(props.modelValue.bag?.iCalendarContent ?? "", "ICalendarContent");
+    const namedSchedule = propertyRef<ListItemBag | null>(props.modelValue.bag?.namedSchedule ?? null, "NamedSchedule");
+    const schedulingMustMeetRequirements = propertyRef(props.modelValue.bag?.schedulingMustMeetRequirements ?? false, "SchedulingMustMeetRequirements");
+    const disableScheduling = propertyRef(props.modelValue.bag?.disableScheduling ?? false, "DisableScheduling");
+    const disableScheduleToolboxAccess = propertyRef(props.modelValue.bag?.disableScheduleToolboxAccess ?? false, "DisableScheduleToolboxAccess");
+    const scheduleConfirmationLogic = propertyRef<ScheduleConfirmationLogic | null>(props.modelValue.bag?.scheduleConfirmationLogic ?? null, "ScheduleConfirmationLogic");
+    const scheduleCoordinatorPerson = propertyRef<ListItemBag | undefined>(props.modelValue.bag?.scheduleCoordinatorPerson ?? undefined, "ScheduleCoordinatorPerson");
+    const scheduleCoordinatorNotificationTypes = propertyRef<ScheduleCoordinatorNotificationType>(props.modelValue.bag?.scheduleCoordinatorNotificationTypes ?? ScheduleCoordinatorNotificationType.None, "ScheduleCoordinatorNotificationTypes");
+    const attendanceRecordRequiredForCheckIn = propertyRef<AttendanceRecordRequiredForCheckIn>(props.modelValue.bag?.attendanceRecordRequiredForCheckIn ?? AttendanceRecordRequiredForCheckIn.ScheduleNotRequired, "AttendanceRecordRequiredForCheckIn");
+    const isChatEnabledOverride = propertyRef<boolean | null>(props.modelValue.bag?.isChatEnabledOverride ?? null, "IsChatEnabledOverride");
+    const isLeavingChatChannelAllowedOverride = propertyRef<boolean | null>(props.modelValue.bag?.isLeavingChatChannelAllowedOverride ?? null, "IsLeavingChatChannelAllowedOverride");
+    const isChatChannelPublicOverride = propertyRef<boolean | null>(props.modelValue.bag?.isChatChannelPublicOverride ?? null, "IsChatChannelPublicOverride");
+    const isChatChannelAlwaysShownOverride = propertyRef<boolean | null>(props.modelValue.bag?.isChatChannelAlwaysShownOverride ?? null, "IsChatChannelAlwaysShownOverride");
+    const chatPushNotificationModeOverride = propertyRef<ChatNotificationMode | null>(props.modelValue.bag?.chatPushNotificationModeOverride ?? null, "ChatPushNotificationModeOverride");
+    const chatChannelAvatarBinaryFile = propertyRef<ListItemBag | null>(props.modelValue.bag?.chatChannelAvatarBinaryFile ?? null, "ChatChannelAvatarBinaryFile");
+
+    // The properties that are being edited. This should only contain
+    // objects returned by propertyRef().
+    const propRefs = [name, description, isActive, isPublic, inactiveReasonValueId, inactiveReasonNote, inactivateChildGroups, photoBinaryFile,
+        groupTypeId, parentGroup, campus, statusValueId, groupCapacity, groupAdministrator, requiredSignatureDocumentTemplateId,
+        recordSourceValue, isSecurityRole, elevatedSecurityLevel,
+        overrideRelationshipStrength, relationshipStrengthOverride, relationshipGrowthEnabledOverride,
+        leaderToLeaderRelationshipMultiplierOverride, leaderToNonLeaderRelationshipMultiplierOverride,
+        nonLeaderToLeaderRelationshipMultiplierOverride, nonLeaderToNonLeaderRelationshipMultiplierOverride,
+        rsvpReminderOffsetDays, scheduleType, weeklyDayOfWeek, weeklyTimeOfDay, iCalendarContent, namedSchedule,
+        schedulingMustMeetRequirements, disableScheduling, disableScheduleToolboxAccess,
+        scheduleConfirmationLogic, scheduleCoordinatorPerson, scheduleCoordinatorNotificationTypes, attendanceRecordRequiredForCheckIn,
+        isChatEnabledOverride, isLeavingChatChannelAllowedOverride, isChatChannelPublicOverride,
+        isChatChannelAlwaysShownOverride, chatPushNotificationModeOverride, chatChannelAvatarBinaryFile];
+
+    // #endregion
+
+    // #region Computed Values
+
+    const inactiveReasonValueIdValue = computed<string>({
+        get(): string {
+            return inactiveReasonValueId.value?.toString() ?? "";
+        },
+        set(newValue: string) {
+            inactiveReasonValueId.value = nullableInt(newValue);
+        }
+    });
+
+    const groupTypeIdValue = computed<string>({
+        get(): string {
+            return groupTypeId.value?.toString() ?? "";
+        },
+        set(newValue: string) {
+            groupTypeId.value = nullableInt(newValue);
+        }
+    });
+
+    const statusValueIdValue = computed<string>({
+        get(): string {
+            return statusValueId.value?.toString() ?? "";
+        },
+        set(newValue: string) {
+            statusValueId.value = nullableInt(newValue);
+        }
+    });
+
+    const requiredSignatureDocumentTemplateIdValue = computed<string>({
+        get(): string {
+            return requiredSignatureDocumentTemplateId.value?.toString() ?? "";
+        },
+        set(newValue: string) {
+            requiredSignatureDocumentTemplateId.value = nullableInt(newValue);
+        }
+    });
+
+    const elevatedSecurityLevelValue = computed<string>({
+        get(): string {
+            return elevatedSecurityLevel.value.toString();
+        },
+        set(newValue: string) {
+            elevatedSecurityLevel.value = (parseInt(newValue, 10) || ElevatedSecurityLevel.None) as ElevatedSecurityLevel;
+        }
+    });
+
+    const relationshipStrengthOverrideValue = computed<string>({
+        get(): string {
+            return relationshipStrengthOverride.value?.toString() ?? "";
+        },
+        set(newValue: string) {
+            relationshipStrengthOverride.value = nullableInt(newValue) as RelationshipStrength | null;
+        }
+    });
+
+    const leaderToLeaderRelationshipMultiplierOverrideValue = computed<number | null>({
+        get(): number | null {
+            return percentToInt(leaderToLeaderRelationshipMultiplierOverride.value);
+        },
+        set(newValue: number | null) {
+            leaderToLeaderRelationshipMultiplierOverride.value = intToPercent(newValue);
+        }
+    });
+
+    const leaderToNonLeaderRelationshipMultiplierOverrideValue = computed<number | null>({
+        get(): number | null {
+            return percentToInt(leaderToNonLeaderRelationshipMultiplierOverride.value);
+        },
+        set(newValue: number | null) {
+            leaderToNonLeaderRelationshipMultiplierOverride.value = intToPercent(newValue);
+        }
+    });
+
+    const nonLeaderToLeaderRelationshipMultiplierOverrideValue = computed<number | null>({
+        get(): number | null {
+            return percentToInt(nonLeaderToLeaderRelationshipMultiplierOverride.value);
+        },
+        set(newValue: number | null) {
+            nonLeaderToLeaderRelationshipMultiplierOverride.value = intToPercent(newValue);
+        }
+    });
+
+    const nonLeaderToNonLeaderRelationshipMultiplierOverrideValue = computed<number | null>({
+        get(): number | null {
+            return percentToInt(nonLeaderToNonLeaderRelationshipMultiplierOverride.value);
+        },
+        set(newValue: number | null) {
+            nonLeaderToNonLeaderRelationshipMultiplierOverride.value = intToPercent(newValue);
+        }
+    });
+
+    const scheduleTypeValue = computed<string>({
+        get(): string {
+            return scheduleType.value.toString();
+        },
+        set(newValue: string) {
+            scheduleType.value = (parseInt(newValue, 10) || ScheduleType.None) as ScheduleType;
+        }
+    });
+
+    const weeklyDayOfWeekValue = computed<string>({
+        get(): string {
+            return weeklyDayOfWeek.value != null ? weeklyDayOfWeek.value.toString() : "";
+        },
+        set(newValue: string) {
+            weeklyDayOfWeek.value = nullableInt(newValue);
+        }
+    });
+
+    const weeklyTimeOfDayValue = computed<TimePickerValue>({
+        get(): TimePickerValue {
+            return parseTimeString(weeklyTimeOfDay.value);
+        },
+        set(newValue: TimePickerValue) {
+            weeklyTimeOfDay.value = formatTimeValue(newValue);
+        }
+    });
+
+    const scheduleConfirmationLogicValue = computed<string>({
+        get(): string {
+            return scheduleConfirmationLogic.value?.toString() ?? "";
+        },
+        set(newValue: string) {
+            scheduleConfirmationLogic.value = (newValue ? parseInt(newValue, 10) : null) as ScheduleConfirmationLogic | null;
+        }
+    });
+
+    const scheduleCoordinatorNotificationTypesValue = computed<string[]>({
+        get(): string[] {
+            return extractFlagValues(scheduleCoordinatorNotificationTypes.value);
+        },
+        set(newValue: string[]) {
+            scheduleCoordinatorNotificationTypes.value = combineFlagValues(newValue) as ScheduleCoordinatorNotificationType;
+        }
+    });
+
+    const attendanceRecordRequiredForCheckInValue = computed<string>({
+        get(): string {
+            return attendanceRecordRequiredForCheckIn.value.toString();
+        },
+        set(newValue: string) {
+            attendanceRecordRequiredForCheckIn.value = (parseInt(newValue, 10) || AttendanceRecordRequiredForCheckIn.ScheduleNotRequired) as AttendanceRecordRequiredForCheckIn;
+        }
+    });
+
+    const isChatEnabledOverrideValue = computed<string>({
+        get(): string {
+            return triStateToString(isChatEnabledOverride.value);
+        },
+        set(newValue: string) {
+            isChatEnabledOverride.value = stringToTriState(newValue);
+        }
+    });
+
+    const isLeavingChatChannelAllowedOverrideValue = computed<string>({
+        get(): string {
+            return triStateToString(isLeavingChatChannelAllowedOverride.value);
+        },
+        set(newValue: string) {
+            isLeavingChatChannelAllowedOverride.value = stringToTriState(newValue);
+        }
+    });
+
+    const isChatChannelPublicOverrideValue = computed<string>({
+        get(): string {
+            return triStateToString(isChatChannelPublicOverride.value);
+        },
+        set(newValue: string) {
+            isChatChannelPublicOverride.value = stringToTriState(newValue);
+        }
+    });
+
+    const isChatChannelAlwaysShownOverrideValue = computed<string>({
+        get(): string {
+            return triStateToString(isChatChannelAlwaysShownOverride.value);
+        },
+        set(newValue: string) {
+            isChatChannelAlwaysShownOverride.value = stringToTriState(newValue);
+        }
+    });
+
+    const chatPushNotificationModeOverrideValue = computed<string>({
+        get(): string {
+            return chatPushNotificationModeOverride.value?.toString() ?? "";
+        },
+        set(newValue: string) {
+            chatPushNotificationModeOverride.value = (newValue ? parseInt(newValue, 10) : null) as ChatNotificationMode | null;
+        }
+    });
+
+    const allowedGroupTypeItems = computed((): ListItemBag[] => props.allowedGroupTypes ?? []);
+    const signatureDocumentTemplateItems = computed((): ListItemBag[] => props.signatureDocumentTemplates ?? []);
+    const inactiveReasonItems = computed((): ListItemBag[] => props.groupTypeOptions.inactiveReasons ?? []);
+    const statusItems = computed((): ListItemBag[] => props.groupTypeOptions.statusValues ?? []);
+
+    const elevatedSecurityLevelItems = computed((): ListItemBag[] => {
+        return Object.entries(ElevatedSecurityLevelDescription).map(([value, text]) => ({
+            value: value.toString(),
+            text: String(text)
+        }));
+    });
+
+    const relationshipStrengthItems = computed((): ListItemBag[] => {
+        return Object.entries(RelationshipStrengthDescription).map(([value, text]) => ({
+            value: value.toString(),
+            text: String(text)
+        }));
+    });
+
+    const scheduleTypeItems = computed((): ListItemBag[] => {
+        const allowed = props.groupTypeOptions.allowedScheduleTypes ?? 0;
+        const items: ListItemBag[] = [{ value: ScheduleType.None.toString(), text: ScheduleTypeDescription[ScheduleType.None] ?? "None" }];
+        if ((allowed & ScheduleType.Weekly) === ScheduleType.Weekly) {
+            items.push({ value: ScheduleType.Weekly.toString(), text: ScheduleTypeDescription[ScheduleType.Weekly] ?? "Weekly" });
+        }
+        if ((allowed & ScheduleType.Custom) === ScheduleType.Custom) {
+            items.push({ value: ScheduleType.Custom.toString(), text: ScheduleTypeDescription[ScheduleType.Custom] ?? "Custom" });
+        }
+        if ((allowed & ScheduleType.Named) === ScheduleType.Named) {
+            items.push({ value: ScheduleType.Named.toString(), text: ScheduleTypeDescription[ScheduleType.Named] ?? "Named" });
+        }
+        return items;
+    });
+
+    const scheduleConfirmationLogicItems = computed((): ListItemBag[] => {
+        return Object.entries(ScheduleConfirmationLogicDescription).map(([value, text]) => ({
+            value: value.toString(),
+            text: String(text)
+        }));
+    });
+
+    const coordinatorNotificationItems = computed((): ListItemBag[] => [
+        { value: ScheduleCoordinatorNotificationType.Decline.toString(), text: "Decline" },
+        { value: ScheduleCoordinatorNotificationType.Accept.toString(), text: "Accept" },
+        { value: ScheduleCoordinatorNotificationType.SelfSchedule.toString(), text: "Self-Schedule" }
+    ]);
+
+    const attendanceRecordRequiredForCheckInItems = computed((): ListItemBag[] => {
+        return Object.entries(AttendanceRecordRequiredForCheckInDescription).map(([value, text]) => ({
+            value: value.toString(),
+            text: String(text)
+        }));
+    });
+
+    const triStateOverrideItems = computed((): ListItemBag[] => [
+        { value: "", text: "Inherit from Group Type" },
+        { value: "true", text: "Yes" },
+        { value: "false", text: "No" }
+    ]);
+
+    const chatPushNotificationModeItems = computed((): ListItemBag[] => {
+        return Object.entries(ChatNotificationModeDescription).map(([value, text]) => ({
+            value: value.toString(),
+            text: String(text)
+        }));
+    });
+
+    // #endregion
+
+    // #region Watchers
+
+    // Inbound: re-sync local refs when the parent rebags the entity.
+    // updateRefValue no-ops when values are equal, so this terminates
+    // any echo loop with the outbound watcher below.
+    watch(() => props.modelValue, () => {
+        // Section 1
+        updateRefValue(name, props.modelValue.bag?.name ?? "");
+        updateRefValue(description, props.modelValue.bag?.description ?? "");
+        updateRefValue(isActive, props.modelValue.bag?.isActive ?? true);
+        updateRefValue(isPublic, props.modelValue.bag?.isPublic ?? false);
+        updateRefValue(inactiveReasonValueId, props.modelValue.bag?.inactiveReasonValueId ?? null);
+        updateRefValue(inactiveReasonNote, props.modelValue.bag?.inactiveReasonNote ?? "");
+        updateRefValue(inactivateChildGroups, props.modelValue.bag?.inactivateChildGroups ?? false);
+        updateRefValue(photoBinaryFile, props.modelValue.bag?.photoBinaryFile ?? null);
+
+        // Section 2 Stack 1
+        updateRefValue(groupTypeId, props.modelValue.bag?.groupTypeId ?? null);
+        updateRefValue(parentGroup, props.modelValue.bag?.parentGroup ?? null);
+        updateRefValue(campus, props.modelValue.bag?.campus ?? null);
+        updateRefValue(statusValueId, props.modelValue.bag?.statusValueId ?? null);
+
+        // Section 2 Stack 2
+        updateRefValue(groupAdministrator, props.modelValue.bag?.administrator ?? undefined);
+        updateRefValue(groupCapacity, props.modelValue.bag?.groupCapacity ?? null);
+        updateRefValue(requiredSignatureDocumentTemplateId, props.modelValue.bag?.requiredSignatureDocumentTemplateId ?? null);
+        updateRefValue(recordSourceValue, props.modelValue.bag?.groupMemberRecordSource ?? null);
+        updateRefValue(isSecurityRole, props.modelValue.bag?.isSecurityRole ?? false);
+        updateRefValue(elevatedSecurityLevel, props.modelValue.bag?.elevatedSecurityLevel ?? ElevatedSecurityLevel.None);
+
+        // Section 2 Stack 3
+        updateRefValue(overrideRelationshipStrength, props.modelValue.bag?.overrideRelationshipStrength ?? false);
+        updateRefValue(relationshipStrengthOverride, props.modelValue.bag?.relationshipStrengthOverride ?? null);
+        updateRefValue(relationshipGrowthEnabledOverride, props.modelValue.bag?.relationshipGrowthEnabledOverride ?? false);
+        updateRefValue(leaderToLeaderRelationshipMultiplierOverride, props.modelValue.bag?.leaderToLeaderRelationshipMultiplierOverride ?? null);
+        updateRefValue(leaderToNonLeaderRelationshipMultiplierOverride, props.modelValue.bag?.leaderToNonLeaderRelationshipMultiplierOverride ?? null);
+        updateRefValue(nonLeaderToLeaderRelationshipMultiplierOverride, props.modelValue.bag?.nonLeaderToLeaderRelationshipMultiplierOverride ?? null);
+        updateRefValue(nonLeaderToNonLeaderRelationshipMultiplierOverride, props.modelValue.bag?.nonLeaderToNonLeaderRelationshipMultiplierOverride ?? null);
+
+        // Section 3
+        updateRefValue(rsvpReminderOffsetDays, props.modelValue.bag?.rsvpReminderOffsetDays ?? null);
+
+        // Section 4 Stack 1
+        updateRefValue(scheduleType, props.modelValue.bag?.scheduleType ?? ScheduleType.None);
+        updateRefValue(weeklyDayOfWeek, props.modelValue.bag?.weeklyDayOfWeek ?? null);
+        updateRefValue(weeklyTimeOfDay, props.modelValue.bag?.weeklyTimeOfDay ?? null);
+        updateRefValue(iCalendarContent, props.modelValue.bag?.iCalendarContent ?? "");
+        updateRefValue(namedSchedule, props.modelValue.bag?.namedSchedule ?? null);
+
+        // Section 4 Stack 3
+        updateRefValue(schedulingMustMeetRequirements, props.modelValue.bag?.schedulingMustMeetRequirements ?? false);
+        updateRefValue(disableScheduling, props.modelValue.bag?.disableScheduling ?? false);
+        updateRefValue(disableScheduleToolboxAccess, props.modelValue.bag?.disableScheduleToolboxAccess ?? false);
+        updateRefValue(scheduleConfirmationLogic, props.modelValue.bag?.scheduleConfirmationLogic ?? null);
+        updateRefValue(scheduleCoordinatorPerson, props.modelValue.bag?.scheduleCoordinatorPerson ?? undefined);
+        updateRefValue(scheduleCoordinatorNotificationTypes, props.modelValue.bag?.scheduleCoordinatorNotificationTypes ?? ScheduleCoordinatorNotificationType.None);
+        updateRefValue(attendanceRecordRequiredForCheckIn, props.modelValue.bag?.attendanceRecordRequiredForCheckIn ?? AttendanceRecordRequiredForCheckIn.ScheduleNotRequired);
+
+        // Section 8
+        updateRefValue(isChatEnabledOverride, props.modelValue.bag?.isChatEnabledOverride ?? null);
+        updateRefValue(isLeavingChatChannelAllowedOverride, props.modelValue.bag?.isLeavingChatChannelAllowedOverride ?? null);
+        updateRefValue(isChatChannelPublicOverride, props.modelValue.bag?.isChatChannelPublicOverride ?? null);
+        updateRefValue(isChatChannelAlwaysShownOverride, props.modelValue.bag?.isChatChannelAlwaysShownOverride ?? null);
+        updateRefValue(chatPushNotificationModeOverride, props.modelValue.bag?.chatPushNotificationModeOverride ?? null);
+        updateRefValue(chatChannelAvatarBinaryFile, props.modelValue.bag?.chatChannelAvatarBinaryFile ?? null);
+    });
+
+    // Outbound: emit a fresh ValidPropertiesBox when any tracked
+    // propertyRef changes.
+    watch([...propRefs], () => {
+        const newValue: ValidPropertiesBox<GroupBag> = {
+            bag: { ...props.modelValue.bag } as GroupBag
+        };
+
+        // Section 1
+        setPropertiesBoxValue(newValue, "name", name.value);
+        setPropertiesBoxValue(newValue, "description", description.value);
+        setPropertiesBoxValue(newValue, "isActive", isActive.value);
+        setPropertiesBoxValue(newValue, "isPublic", isPublic.value);
+        setPropertiesBoxValue(newValue, "inactiveReasonValueId", inactiveReasonValueId.value);
+        setPropertiesBoxValue(newValue, "inactiveReasonNote", inactiveReasonNote.value);
+        setPropertiesBoxValue(newValue, "inactivateChildGroups", inactivateChildGroups.value);
+        setPropertiesBoxValue(newValue, "photoBinaryFile", photoBinaryFile.value);
+
+        // Section 2 Stack 1
+        setPropertiesBoxValue(newValue, "groupTypeId", groupTypeId.value);
+        setPropertiesBoxValue(newValue, "parentGroup", parentGroup.value);
+        setPropertiesBoxValue(newValue, "campus", campus.value);
+        setPropertiesBoxValue(newValue, "statusValueId", statusValueId.value);
+
+        // Section 2 Stack 2
+        setPropertiesBoxValue(newValue, "administrator", groupAdministrator.value);
+        setPropertiesBoxValue(newValue, "groupCapacity", groupCapacity.value);
+        setPropertiesBoxValue(newValue, "requiredSignatureDocumentTemplateId", requiredSignatureDocumentTemplateId.value);
+        setPropertiesBoxValue(newValue, "groupMemberRecordSource", recordSourceValue.value);
+        setPropertiesBoxValue(newValue, "isSecurityRole", isSecurityRole.value);
+        setPropertiesBoxValue(newValue, "elevatedSecurityLevel", elevatedSecurityLevel.value);
+
+        // Section 2 Stack 3
+        setPropertiesBoxValue(newValue, "overrideRelationshipStrength", overrideRelationshipStrength.value);
+        setPropertiesBoxValue(newValue, "relationshipStrengthOverride", relationshipStrengthOverride.value);
+        setPropertiesBoxValue(newValue, "relationshipGrowthEnabledOverride", relationshipGrowthEnabledOverride.value);
+        setPropertiesBoxValue(newValue, "leaderToLeaderRelationshipMultiplierOverride", leaderToLeaderRelationshipMultiplierOverride.value);
+        setPropertiesBoxValue(newValue, "leaderToNonLeaderRelationshipMultiplierOverride", leaderToNonLeaderRelationshipMultiplierOverride.value);
+        setPropertiesBoxValue(newValue, "nonLeaderToLeaderRelationshipMultiplierOverride", nonLeaderToLeaderRelationshipMultiplierOverride.value);
+        setPropertiesBoxValue(newValue, "nonLeaderToNonLeaderRelationshipMultiplierOverride", nonLeaderToNonLeaderRelationshipMultiplierOverride.value);
+
+        // Section 3
+        setPropertiesBoxValue(newValue, "rsvpReminderOffsetDays", rsvpReminderOffsetDays.value);
+
+        // Section 4 Stack 1
+        setPropertiesBoxValue(newValue, "scheduleType", scheduleType.value);
+        setPropertiesBoxValue(newValue, "weeklyDayOfWeek", weeklyDayOfWeek.value);
+        setPropertiesBoxValue(newValue, "weeklyTimeOfDay", weeklyTimeOfDay.value);
+        setPropertiesBoxValue(newValue, "iCalendarContent", iCalendarContent.value);
+        setPropertiesBoxValue(newValue, "namedSchedule", namedSchedule.value);
+
+        // Section 4 Stack 3
+        setPropertiesBoxValue(newValue, "schedulingMustMeetRequirements", schedulingMustMeetRequirements.value);
+        setPropertiesBoxValue(newValue, "disableScheduling", disableScheduling.value);
+        setPropertiesBoxValue(newValue, "disableScheduleToolboxAccess", disableScheduleToolboxAccess.value);
+        setPropertiesBoxValue(newValue, "scheduleConfirmationLogic", scheduleConfirmationLogic.value);
+        setPropertiesBoxValue(newValue, "scheduleCoordinatorPerson", scheduleCoordinatorPerson.value);
+        setPropertiesBoxValue(newValue, "scheduleCoordinatorNotificationTypes", scheduleCoordinatorNotificationTypes.value);
+        setPropertiesBoxValue(newValue, "attendanceRecordRequiredForCheckIn", attendanceRecordRequiredForCheckIn.value);
+
+        // Section 8
+        setPropertiesBoxValue(newValue, "isChatEnabledOverride", isChatEnabledOverride.value);
+        setPropertiesBoxValue(newValue, "isLeavingChatChannelAllowedOverride", isLeavingChatChannelAllowedOverride.value);
+        setPropertiesBoxValue(newValue, "isChatChannelPublicOverride", isChatChannelPublicOverride.value);
+        setPropertiesBoxValue(newValue, "isChatChannelAlwaysShownOverride", isChatChannelAlwaysShownOverride.value);
+        setPropertiesBoxValue(newValue, "chatPushNotificationModeOverride", chatPushNotificationModeOverride.value);
+        setPropertiesBoxValue(newValue, "chatChannelAvatarBinaryFile", chatChannelAvatarBinaryFile.value);
+
+        emit("update:modelValue", newValue);
+    });
+
+    // #endregion
+
+    // Auto-emit propertyChanged for every tracked propertyRef.
+    watchPropertyChanges(propRefs, emit);
 </script>

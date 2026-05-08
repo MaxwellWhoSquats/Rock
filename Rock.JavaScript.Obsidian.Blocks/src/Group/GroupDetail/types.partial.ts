@@ -43,6 +43,7 @@ export const enum NavigationUrlKey {
  */
 export const enum BlockActionName {
     Edit = "Edit",
+    Save = "Save",
     Delete = "Delete",
     Archive = "Archive",
     ArchiveWithChildren = "ArchiveWithChildren",
