@@ -53,11 +53,11 @@ Research finding: dead code with no observable consumers.
 
 **Background.** When `currentGroupTypeId` changes mid-edit, the form reshapes itself dramatically (panels show/hide, options repopulate, inherited attributes refresh). The cascade map is in [research/webforms/22-grouptype-cascade.md](../webforms/22-grouptype-cascade.md).
 
-| Approach | Tradeoff |
-|---|---|
+| Approach                                                      | Tradeoff                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------- |
 | A: Front-load all GroupType options into initial `OptionsBag` | Zero round trips, ~3.75 KB per GroupType, ~187 KB for 50 GroupTypes |
-| B: Server round-trip per change | Smaller payload, ~50-300ms latency per change |
-| C: Hybrid — initial-current + lazy-cache on change | Best UX for "settle on right type" workflows; most code complexity |
+| B: Server round-trip per change                               | Smaller payload, ~50-300ms latency per change                       |
+| C: Hybrid — initial-current + lazy-cache on change            | Best UX for "settle on right type" workflows; most code complexity  |
 
 **Resolved:** Approach B (server round-trip per change). GroupType rarely changes mid-edit on real groups, so the initial-payload cost of Approach A is overkill; a single server fetch on change is the right tradeoff.
 
@@ -103,6 +103,7 @@ Run `node .claude/skills/convert-block/scripts/generate-guids.js` to obtain the 
 **Background.** The view panel design replaces the WebForms audit drawer with an "Audit Details" modal opened from the panel-header kebab menu. The modal body is not in any captured Figma frame.
 
 **Resolved:** The Figma does include the Audit Details frame; user supplied the screenshot. Trigger: kebab menu in the panel header with a single entry, "Audit Details" (no other kebab actions). Modal title: "Audit Details". Body is a single horizontal row with three columns:
+
 - **Created By**: person name + relative time (e.g., "Alisha Marble (1 month ago)").
 - **Modified By**: person name + relative time (e.g., "Alisha Marble (1 week ago)").
 - **Id**: the numeric `Group.Id` (display only; not the IdKey).
@@ -115,9 +116,9 @@ The footer has standard Modal chrome (Cancel + Save shown in Figma; since the mo
 
 So this is not a "reuse vs. new" question; it is a "what do we name the new column" question.
 
-| Option | Name | Argument |
-|---|---|---|
-| **(a)** | `PhotoId` (int? → BinaryFile) | Mirrors `Person.PhotoId`. Per the Prime Directive (follow existing patterns), this is the cross-Rock convention for "primary entity image." |
+| Option  | Name                                        | Argument                                                                                                                                            |
+| ------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(a)** | `PhotoId` (int? → BinaryFile)               | Mirrors `Person.PhotoId`. Per the Prime Directive (follow existing patterns), this is the cross-Rock convention for "primary entity image."         |
 | **(b)** | `HeroImageBinaryFileId` (int? → BinaryFile) | Group-internal-consistent with `ChatChannelAvatarBinaryFileId`. More descriptive of intent (the image is a 16:9 hero, not a person-style headshot). |
 
 **Resolved:** Add `Group.PhotoId` (nullable int → BinaryFile, FK with `WillCascadeOnDelete(false)` and `ON DELETE SET NULL` per data-model rules), mirroring `Person.PhotoId`. Per the Prime Directive, follow the existing cross-Rock convention. Apply the same `IsTemporary` toggle pattern the chat-channel-avatar uses for orphan cleanup. The column add (entity + migration + EntityTypeConfiguration nav property + codegen regen) lands in **Phase 2** (Complete the view panel). The uploader (using the `IsTemporary` toggle) lands in **Phase 3** alongside the chat-channel-avatar uploader. See [research/webforms/14-chat.md](../webforms/14-chat.md) and [research/webforms/23-validations-and-cascades.md](../webforms/23-validations-and-cascades.md). Phase 1 (View panel core) wires up the hero region but the bag's photo URL is always null until Phase 2 ships, so the region omits during the gap.
@@ -154,14 +155,14 @@ Six pre-existing bugs surfaced during research. Each needs a Phase 0 classificat
 
 **Resolved:** All six classifications below confirmed by user. The "fix-during" rows are scoped into the phase that owns the affected feature (per the "Lands in" column).
 
-| # | Bug | Source | Resolution | Lands in |
-|---|---|---|---|---|
-| L1 | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../webforms/04-code-behind-walkthrough.md) | fix-during (trivial; the new code structure naturally avoids it). | Phase 3 (edit core / GroupType edit details). |
-| L2 | Possible duplicate-edit corruption in group requirements. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | defer-to-bugfix-spec for confirmation; not blocking. | Separate `/bugfix` spec. |
-| L3 | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup. | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md) | fix-during (use `EntityTypeCache.Get<DataView>().Id`). | Phase 5 (requirements modal). |
-| L4 | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding). | [research/webforms/13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." | Phase 5 (member workflow triggers). |
-| L5 | Missing `TagCategory` block attribute (referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared). | [research/webforms/27-misc-surfaces.md](../webforms/27-misc-surfaces.md) | drop the reference; latent dead code with no consumer. | Phase 1 (block-attribute declarations); simply do not port the reference. |
-| L6 | Open-redirect risk on `returnUrl` parameter (no validation). | [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) | fix-during. Validate same-origin or reject. | Phase 1 (Delete/Archive/Copy redirect handling reads `returnUrl`). |
+| #   | Bug                                                                                                                                                                   | Source                                                                                         | Resolution                                                                             | Lands in                                                                  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| L1  | Duplicate code block at [GroupDetail.ascx.cs:2245-2273](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2245) inside `ShowGroupTypeEditDetails` (same logic appears twice). | [research/webforms/04-code-behind-walkthrough.md](../webforms/04-code-behind-walkthrough.md)   | fix-during (trivial; the new code structure naturally avoids it).                      | Phase 3 (edit core / GroupType edit details).                             |
+| L2  | Possible duplicate-edit corruption in group requirements.                                                                                                             | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md)             | defer-to-bugfix-spec for confirmation; not blocking.                                   | Separate `/bugfix` spec.                                                  |
+| L3  | Hard-coded `EntityTypeId=15` in `mdGroupRequirement` markup.                                                                                                          | [research/webforms/11-group-requirements.md](../webforms/11-group-requirements.md)             | fix-during (use `EntityTypeCache.Get<DataView>().Id`).                                 | Phase 5 (requirements modal).                                             |
+| L4  | XSS hole in `FormatTriggerType` (user-controlled input HTML-interpolated without encoding).                                                                           | [research/webforms/13-member-workflow-triggers.md](../webforms/13-member-workflow-triggers.md) | fix-during. Per memory, "HTML-encode user-controlled values during conversion review." | Phase 5 (member workflow triggers).                                       |
+| L5  | Missing `TagCategory` block attribute (referenced at [GroupDetail.ascx.cs:543](RockWeb/Blocks/Groups/GroupDetail.ascx.cs:543) but never declared).                    | [research/webforms/27-misc-surfaces.md](../webforms/27-misc-surfaces.md)                       | drop the reference; latent dead code with no consumer.                                 | Phase 1 (block-attribute declarations); simply do not port the reference. |
+| L6  | Open-redirect risk on `returnUrl` parameter (no validation).                                                                                                          | [research/webforms/18-cross-block-dependencies.md](../webforms/18-cross-block-dependencies.md) | fix-during. Validate same-origin or reject.                                            | Phase 1 (Delete/Archive/Copy redirect handling reads `returnUrl`).        |
 
 ## Locked decisions
 
@@ -188,15 +189,15 @@ public class GroupDetail : RockEntityDetailBlockType<Group, GroupBag>, IBreadCru
 
 ### Block actions
 
-| Action | Returns | Notes |
-|---|---|---|
-| `Edit` | `ValidPropertiesBox<GroupBag>` | Returns full edit-mode bag for an existing group, or a new bag for `groupId == 0`. |
-| `Save` | `ValidPropertiesBox<GroupBag>` (200) OR redirect URL string (201) | 200 on update (stay on page in view mode), 201 on create with redirect to the new group's URL. |
-| `Delete` | redirect URL string | Auth-checked, runs the WebForms delete logic verbatim (see [research/webforms/16-archive-delete-copy.md](../webforms/16-archive-delete-copy.md)). |
-| `Archive` | redirect URL string | Single-group archive. |
-| `ArchiveWithChildren` | redirect URL string | Cascade archive. |
-| `Copy` | redirect URL string | Includes `IncludeChildGroups` parameter; default UNCHECKED (changed from WebForms which had it CHECKED). |
-| `GetGroupTypeOptions` | `GroupTypeOptionsBag` | Required by Q2 Approach B; called from the Vue layer when `currentGroupTypeId` changes mid-edit. |
+| Action                | Returns                                                           | Notes                                                                                                                                             |
+| --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Edit`                | `ValidPropertiesBox<GroupBag>`                                    | Returns full edit-mode bag for an existing group, or a new bag for `groupId == 0`.                                                                |
+| `Save`                | `ValidPropertiesBox<GroupBag>` (200) OR redirect URL string (201) | 200 on update (stay on page in view mode), 201 on create with redirect to the new group's URL.                                                    |
+| `Delete`              | redirect URL string                                               | Auth-checked, runs the WebForms delete logic verbatim (see [research/webforms/16-archive-delete-copy.md](../webforms/16-archive-delete-copy.md)). |
+| `Archive`             | redirect URL string                                               | Single-group archive.                                                                                                                             |
+| `ArchiveWithChildren` | redirect URL string                                               | Cascade archive.                                                                                                                                  |
+| `Copy`                | redirect URL string                                               | Includes `IncludeChildGroups` parameter; default UNCHECKED (changed from WebForms which had it CHECKED).                                          |
+| `GetGroupTypeOptions` | `GroupTypeOptionsBag`                                             | Required by Q2 Approach B; called from the Vue layer when `currentGroupTypeId` changes mid-edit.                                                  |
 
 ### Partial structure
 
@@ -250,17 +251,17 @@ Rock.ViewModels/Blocks/Group/GroupDetail/
 
 Per [ROADMAP.md](ROADMAP.md), tightened by [research/design/](../design/) and reordered after Phase 1's self-review (see "View-first reordering" note below):
 
-| Phase | Title | Output |
-|---|---|---|
-| 0 | Architecture & Phase 1 spec | This document + `01-phase-1-shell-and-view.md` |
-| 1 | Block shell + View panel core + Delete/Archive/Copy + Audit modal + Linkages bag | Working view-mode block (mostly). Group Image hero region wired but `bag.photoUrl` always null until Phase 2. Meeting Locations card NOT yet rendered. Edit mode is a placeholder. |
-| 2 | Complete the view panel | New `Group.PhotoId` column + migration + nav property + codegen regen. Group Image hero rendering. Meeting Locations card with map cards (read-only). View-panel design fidelity is now complete. |
-| 3 | Edit panel core (Top fields + General + RSVP + Scheduling + Chat) | All scalar-field editing + Save flow + GroupType cascade reactivity (Q2 Approach B). Group photo uploader and chat-channel-avatar uploader (both use the `IsTemporary` BinaryFile pattern). Add path. `?autoEdit=true` handling. Trailblazer per-field styling (Q6). |
-| 4 | Attributes (Group + Member definitions) | Attribute editor working. |
-| 5 | Requirements + Sync + Member Workflows | Three sub-feature panels with modals. Sync Frequency restyle on existing `<IntervalPicker>` per Q9. L3 / L4 fix-during. |
-| 6 | Locations editing modal + inline schedule logic | Editing-side of Meeting Details (the read-side map cards already shipped in Phase 2). Inline schedule entity management. Most complex sub-feature. |
-| 7 | Update dependencies | Update the 5 still-WebForms destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) so each accepts IdKey on its `GroupId` page parameter. Required because Phase 1+ writes IdKey to all 11 outbound URLs (per Q4) and these 5 destinations will be broken until updated. |
-| 8 | Cutover and cleanup | Verify chop, delete WebForms files, smoke test cross-block callers, release notes. |
+| Phase | Title                                                                            | Output                                                                                                                                                                                                                                                                                                                      |
+| ----- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Architecture & Phase 1 spec                                                      | This document + `01-phase-1-shell-and-view.md`                                                                                                                                                                                                                                                                              |
+| 1     | Block shell + View panel core + Delete/Archive/Copy + Audit modal + Linkages bag | Working view-mode block (mostly). Group Image hero region wired but `bag.photoUrl` always null until Phase 2. Meeting Locations card NOT yet rendered. Edit mode is a placeholder.                                                                                                                                          |
+| 2     | Complete the view panel                                                          | New `Group.PhotoId` column + migration + nav property + codegen regen. Group Image hero rendering. Meeting Locations card with map cards (read-only). View-panel design fidelity is now complete.                                                                                                                           |
+| 3     | Edit panel core (Top fields + General + RSVP + Scheduling + Chat)                | All scalar-field editing + Save flow + GroupType cascade reactivity (Q2 Approach B). Group photo uploader and chat-channel-avatar uploader (both use the `IsTemporary` BinaryFile pattern). Add path. `?autoEdit=true` handling. Trailblazer per-field styling (Q6).                                                        |
+| 4     | Attributes (Group + Member definitions)                                          | Attribute editor working.                                                                                                                                                                                                                                                                                                   |
+| 5     | Requirements + Sync + Member Workflows                                           | Three sub-feature panels with modals. Sync Frequency restyle on existing `<IntervalPicker>` per Q9. L3 / L4 fix-during.                                                                                                                                                                                                     |
+| 6     | Locations editing modal + inline schedule logic                                  | Editing-side of Meeting Details (the read-side map cards already shipped in Phase 2). Inline schedule entity management. Most complex sub-feature.                                                                                                                                                                          |
+| 7     | Update dependencies                                                              | Update the 5 still-WebForms destinations (GroupListPage, FundraisingProgressPage, GroupHistoryPage, GroupMapPage, GroupSchedulerPage) so each accepts IdKey on its `GroupId` page parameter. Required because Phase 1+ writes IdKey to all 11 outbound URLs (per Q4) and these 5 destinations will be broken until updated. |
+| 8     | Cutover and cleanup                                                              | Verify chop, delete WebForms files, smoke test cross-block callers, release notes.                                                                                                                                                                                                                                          |
 
 **View-first reordering (post-Phase 1 self-review).** The original phase plan deferred the Meeting Locations card to old Phase 5 and the `Group.PhotoId` column add to old Phase 2 (bundled with chat-avatar editing), leaving the view panel half-finished across four phases. After Phase 1's self-review the user requested view-first: complete the entire read-only experience in the next phase before any edit-panel work begins. The new Phase 2 (Complete the view panel) absorbs both the column add and the Meeting Locations card view-side. The edit panel and sub-features simply shift down by one number. The original "Phase 6 net-new features" slot was Q6-confirmed empty (Trailblazer is a per-field prop on General-section controls in Phase 3, not a separate feature) and is dropped.
 
@@ -270,13 +271,13 @@ Per [ROADMAP.md](ROADMAP.md), tightened by [research/design/](../design/) and re
 
 The 5 still-WebForms outbound destinations are now in scope for the new Phase 7 ("Update dependencies"). Each will be updated to accept IdKey on its `GroupId` page parameter. Until Phase 7 ships, GroupDetail's IdKey URLs to these destinations are broken (acknowledged tradeoff per Q4).
 
-| Block setting | Destination block | Path |
-|---|---|---|
-| GroupListPage | `Groups/GroupList.ascx` (the tree-view sidebar) | RockWeb/Blocks/Groups/ |
-| FundraisingProgressPage | Fundraising progress block | location TBD |
-| GroupHistoryPage | Group history block | location TBD |
-| GroupMapPage | Group map block | location TBD |
-| GroupSchedulerPage | Group scheduler block | location TBD |
+| Block setting           | Destination block                               | Path                   |
+| ----------------------- | ----------------------------------------------- | ---------------------- |
+| GroupListPage           | `Groups/GroupList.ascx` (the tree-view sidebar) | RockWeb/Blocks/Groups/ |
+| FundraisingProgressPage | Fundraising progress block                      | location TBD           |
+| GroupHistoryPage        | Group history block                             | location TBD           |
+| GroupMapPage            | Group map block                                 | location TBD           |
+| GroupSchedulerPage      | Group scheduler block                           | location TBD           |
 
 ### Inbound callers writing integer Id (out of scope)
 
@@ -332,6 +333,7 @@ After Phase 0, every later phase reads this locked document at session start, fo
 **Locked** on 2026-05-06. All twelve open questions (Q1-Q12) resolved by user during the Phase 0 session. Cross-phase contract is now canonical for all later implementation phases.
 
 Notable resolutions worth flagging here:
+
 - Q1: dropped `[ContextAware(typeof(Group))]` and `ContextEntityBlock` base.
 - Q2: GroupType cascade uses Approach B (server round-trip); the `GetGroupTypeOptions` block action is required by **Phase 3** (post-reordering; was Phase 2 in the original plan).
 - Q4: GroupDetail writes IdKey uniformly to all 11 outbound destinations; the 5 still-WebForms destinations are scoped into **Phase 7 ("Update dependencies")** to accept IdKey before cutover. The phase roadmap is 9 phases (0-8) total.
