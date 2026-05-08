@@ -29,9 +29,11 @@ using Rock.Communication.Chat;
 using Rock.Data;
 using Rock.Enums.Communication.Chat;
 using Rock.Enums.Group;
+using Rock.Lava;
 using Rock.Security;
 using Rock.UniversalSearch;
 using Rock.UniversalSearch.IndexModels;
+using Rock.Utility;
 using Rock.Web.Cache;
 
 namespace Rock.Model
@@ -49,6 +51,22 @@ namespace Rock.Model
         /// <exception cref="System.NotImplementedException"></exception>
         [NotMapped]
         public bool AllowsInteractiveBulkIndexing => true;
+
+        /// <summary>
+        /// Gets the URL of the group's photo, or <see langword="null"/> when
+        /// <see cref="PhotoId"/> is null. Mirrors <see cref="Person.PhotoUrl"/>
+        /// in shape but without the person-aware no-photo fallback; the
+        /// design intentionally omits the hero region entirely when no photo
+        /// is set rather than rendering a placeholder.
+        /// </summary>
+        /// <value>
+        /// URL of the photo, or <see langword="null"/> when no photo is set.
+        /// </value>
+        [LavaVisible]
+        [NotMapped]
+        public virtual string PhotoUrl => PhotoId.HasValue
+            ? FileUrlHelper.GetImageUrl( PhotoId.Value )
+            : null;
 
         /// <summary>
         /// Gets whether this group is overriding its parent group type's peer network configuration in any way.

@@ -21,6 +21,8 @@
 // </copyright>
 //
 
+import { Guid } from "@Obsidian/Types";
+
 /**
  * Per-block options consumed by the Group Detail Vue layer. Carries
  * the visibility flags driving the Group Tools card and the
@@ -107,6 +109,17 @@ export type GroupDetailOptionsBag = {
      * attribute with GroupType.EnableGroupTag.
      */
     isTagListShown: boolean;
+
+    /**
+     * Gets or sets the resolved Rock.SystemGuid.DefinedValue
+     * Guid of the MapStyle block attribute. Passed to the Vue
+     * map renderer (locationCard.partial.obs) so
+     * loadMapResources from @Obsidian/Utility/geo can
+     * fetch the matching map-style settings via the geo-picker REST
+     * endpoint. Null when the block setting is unset, which falls
+     * back to the default Rock map style on the client.
+     */
+    mapStyleValueGuid?: Guid | null;
 
     /**
      * Gets or sets a value indicating whether the Delete button is

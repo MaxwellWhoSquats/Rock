@@ -25,6 +25,7 @@ import { RelationshipStrength } from "@Obsidian/Enums/Group/relationshipStrength
 import { GroupAdministratorBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupAdministratorBag";
 import { GroupDetailGroupTypeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailGroupTypeBag";
 import { GroupLinkagesBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLinkagesBag";
+import { GroupMeetingLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMeetingLocationBag";
 import { ParentGroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/parentGroupBag";
 import { PublicAttributeBag } from "@Obsidian/ViewModels/Utility/publicAttributeBag";
 
@@ -81,18 +82,6 @@ export type GroupBag = {
     groupCapacity?: number | null;
 
     /**
-     * Gets or sets the value of the Goal group attribute, if
-     * configured. Rendered in the Overview card.
-     */
-    groupGoal?: string | null;
-
-    /**
-     * Gets or sets the value of the Group Preference group
-     * attribute, if configured.
-     */
-    groupPreference?: string | null;
-
-    /**
      * Gets or sets the group type reference rendered as a chip in
      * the panel header. Rock.ViewModels.Blocks.Group.GroupDetail.GroupDetailGroupTypeBag.Url
      * is null when the current user lacks ADMINISTRATE on the group
@@ -147,14 +136,18 @@ export type GroupBag = {
      */
     linkages?: GroupLinkagesBag | null;
 
+    /**
+     * Gets or sets the per-GroupLocation meeting location
+     * cards rendered on the right rail of the View panel. Always
+     * emitted; the Vue layer uses a v-if on
+     * length > 0 to omit the entire card when the group
+     * has no locations. Each entry renders as one 16:9 map card with
+     * optional address and schedule below.
+     */
+    meetingLocations?: GroupMeetingLocationBag[] | null;
+
     /** Gets or sets the friendly name of the group. */
     name?: string | null;
-
-    /**
-     * Gets or sets the value of the Neighborhood group
-     * attribute, if configured.
-     */
-    neighborhood?: string | null;
 
     /**
      * Gets or sets the parent group reference. Null when the group
@@ -164,17 +157,12 @@ export type GroupBag = {
 
     /**
      * Gets or sets the URL of the 16:9 hero image at the top of the
-     * Overview card. Always null in Phase 1 because the
-     * Group.PhotoId column ships in Phase 2 (per Q8). The
-     * Vue layer omits the hero region entirely when this is null.
+     * Overview card, populated from Group.PhotoUrl (which
+     * resolves Group.PhotoId through FileUrlHelper).
+     * Null when the group has no photo set; the Vue layer omits the
+     * hero region entirely in that case (no placeholder, per design).
      */
     photoUrl?: string | null;
-
-    /**
-     * Gets or sets the value of the Privacy (private or
-     * public space) group attribute, if configured.
-     */
-    privacy?: string | null;
 
     /**
      * Gets or sets the effective relationship strength for the
@@ -187,6 +175,17 @@ export type GroupBag = {
      * single-sourced.
      */
     relationshipStrength?: RelationshipStrength | null;
+
+    /**
+     * Gets or sets the role-limit warning HTML rendered in the view
+     * panel's top notification surface when one or more
+     * GroupTypeRoles violate their MinCount / MaxCount against the
+     * group's current active member counts. Null / empty hides the
+     * notification. Populated from
+     * Group.GetGroupTypeRoleLimitWarnings(out string); mirrors the
+     * WebForms nbRoleLimitWarning at GroupDetail.ascx.cs:1849-1851.
+     */
+    roleLimitWarning?: string | null;
 
     /**
      * Gets or sets the friendly schedule text for the group's primary

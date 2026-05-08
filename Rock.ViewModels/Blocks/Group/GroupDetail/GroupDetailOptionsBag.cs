@@ -15,6 +15,8 @@
 // </copyright>
 //
 
+using System;
+
 namespace Rock.ViewModels.Blocks.Group.GroupDetail
 {
     /// <summary>
@@ -121,6 +123,17 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// attribute with <c>GroupType.EnableGroupTag</c>.
         /// </summary>
         public bool IsTagListShown { get; set; }
+
+        /// <summary>
+        /// Gets or sets the resolved DefinedValue Guid of the
+        /// <c>MapStyle</c> block attribute. Passed to the Vue map renderer
+        /// (<c>locationCard.partial.obs</c>) so <c>loadMapResources</c>
+        /// from <c>@Obsidian/Utility/geo</c> can fetch the matching
+        /// map-style settings via the geo-picker REST endpoint. Null when
+        /// the block setting is unset, which falls back to the default
+        /// Rock map style on the client.
+        /// </summary>
+        public Guid? MapStyleValueGuid { get; set; }
 
         #endregion
     }

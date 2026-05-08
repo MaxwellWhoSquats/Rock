@@ -44,4 +44,12 @@ export type GroupDetailGroupTypeBag = {
      * either case.
      */
     url?: string | null;
+
+    /**
+     * Gets or sets the GroupType's configured color (hex or named).
+     * Surfaced so the Vue layer can tint the GroupType chip in the
+     * panel header. Empty / null leaves the chip in its default
+     * styling.
+     */
+    color?: string | null;
 };

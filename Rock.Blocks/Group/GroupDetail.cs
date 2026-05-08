@@ -287,18 +287,6 @@ namespace Rock.Blocks.Group
             public const string PageRouting = "Page Routing";
         }
 
-        /// <summary>
-        /// Group attribute keys whose values surface in the redesigned
-        /// Overview card. Each maps to a labeled row.
-        /// </summary>
-        private static class GroupAttributeKey
-        {
-            public const string Goal = "Goal";
-            public const string Neighborhood = "Neighborhood";
-            public const string Privacy = "Privacy";
-            public const string GroupPreference = "GroupPreference";
-        }
-
         #endregion Keys
 
         #region Methods
@@ -419,6 +407,7 @@ namespace Rock.Blocks.Group
             options.IsDeleteVisible  = !entity.IsSystem && !entity.IsArchived && canEdit && !hasHistory;
 
             options.IsTagListShown = GetAttributeValue( AttributeKey.EnableGroupTags ).AsBoolean() && groupType.EnableGroupTag;
+            options.MapStyleValueGuid = GetAttributeValue( AttributeKey.MapStyle ).AsGuidOrNull();
 
             return options;
         }
@@ -433,6 +422,11 @@ namespace Rock.Blocks.Group
             if ( entity == null )
             {
                 return null;
+            }
+
+            if ( entity.Attributes == null )
+            {
+                entity.LoadAttributes( RockContext );
             }
 
             var groupType = GetGroupTypeCache( entity );
@@ -461,19 +455,17 @@ namespace Rock.Blocks.Group
                 IsPublic = entity.IsPublic,
                 RelationshipStrength = GetRelationshipStrength( entity, groupType ),
 
-                // Overview body. PhotoUrl stays null in Phase 1 because
-                // Group has no photo column today; Phase 2 ships the
-                // Group.PhotoId migration per 00-architecture.md Q8.
-                PhotoUrl = null,
+                // Overview body. PhotoUrl resolves through the entity's
+                // computed property which mirrors Person.PhotoUrl shape
+                // and returns null when PhotoId is null (see Q2.2 in the
+                // Phase 2 spec). Null PhotoUrl hides the hero region in
+                // the Vue partial.
+                PhotoUrl = entity.PhotoUrl,
                 Description = entity.Description,
                 Administrator = BuildAdministratorRef( entity.GroupAdministratorPersonAlias?.Person, groupType ),
                 ParentGroup = BuildParentGroupRef( entity.ParentGroup ),
                 ScheduleFriendlyText = entity.Schedule?.FriendlyScheduleText,
-                GroupCapacity = entity.GroupCapacity,
-                GroupGoal = GetGroupAttributeValue( entity, GroupAttributeKey.Goal ),
-                Neighborhood = GetGroupAttributeValue( entity, GroupAttributeKey.Neighborhood ),
-                Privacy = GetGroupAttributeValue( entity, GroupAttributeKey.Privacy ),
-                GroupPreference = GetGroupAttributeValue( entity, GroupAttributeKey.GroupPreference )
+                GroupCapacity = entity.GroupCapacity
             };
         }
 
@@ -487,6 +479,15 @@ namespace Rock.Blocks.Group
 
             var bag = GetCommonEntityBag( entity );
             bag.Linkages = BuildLinkages( entity );
+            bag.MeetingLocations = BuildMeetingLocations( entity );
+
+            if ( entity.GetGroupTypeRoleLimitWarnings( out var roleLimitWarning ) )
+            {
+                bag.RoleLimitWarning = roleLimitWarning;
+            }
+
+            bag.LoadAttributesAndValuesForPublicView( entity, RequestContext.CurrentPerson, enforceSecurity: true );
+
             return bag;
         }
 
@@ -919,28 +920,6 @@ namespace Rock.Blocks.Group
         }
 
         /// <summary>
-        /// Reads a group attribute value by key, loading attributes if
-        /// they have not been loaded yet. Used to surface the Overview
-        /// card's four attribute-driven rows (Goal / Neighborhood /
-        /// Privacy / Group Preference) without coupling them to the edit
-        /// flow.
-        /// </summary>
-        private string GetGroupAttributeValue( Model.Group entity, string key )
-        {
-            if ( entity == null )
-            {
-                return null;
-            }
-
-            if ( entity.Attributes == null )
-            {
-                entity.LoadAttributes( RockContext );
-            }
-
-            return entity.GetAttributeValue( key );
-        }
-
-        /// <summary>
         /// Builds the administrator reference for the Overview card.
         /// Returns null when the person is missing OR when the group
         /// type's <c>ShowAdministrator</c> flag is false (which hides
@@ -1013,7 +992,8 @@ namespace Rock.Blocks.Group
                         typeof( Model.GroupType ),
                         groupType,
                         fallbackUrl: $"/page/GroupTypeDetail?GroupTypeId={Rock.Utility.IdHasher.Instance.GetHash( groupType.Id )}" )
-                    : null
+                    : null,
+                Color = groupType.GroupTypeColor
             };
         }
 
@@ -1153,6 +1133,150 @@ namespace Rock.Blocks.Group
                 Registrations = registrations,
                 EventItemOccurrences = eventItemOccurrences,
                 ContentItems = contentItems
+            };
+        }
+
+        /// <summary>
+        /// Builds the per-<c>GroupLocation</c> Meeting Location card data
+        /// rendered on the right rail of the View panel. Always emits a
+        /// (possibly empty) list so the Vue layer can decide whether to
+        /// render the card via a length check. Card-level visibility:
+        /// the entire card omits when the list is empty.
+        ///
+        /// Card variants per Q2.5 / spec C4:
+        ///   <list type="bullet">
+        ///     <item><c>GroupMember</c> when <c>GroupMemberPersonAliasId</c> is set; address resolves from the family Location.</item>
+        ///     <item><c>Polygon</c> when <c>Location.GeoFence</c> is set; address suppressed.</item>
+        ///     <item><c>Point</c> when <c>Location.GeoPoint</c> is set; address from <c>FormattedAddress</c>.</item>
+        ///     <item><c>Address</c> otherwise; address from <c>FormattedAddress</c>; map shows only if a coordinate is present.</item>
+        ///   </list>
+        ///
+        /// <c>ShowLocationAddresses</c> (block attribute, default true) gates
+        /// the address text uniformly across every card variant per Q2.6:
+        /// when false, no card renders an address regardless of mode.
+        /// Polygon cards always render no address regardless of the flag.
+        /// Per Q2.3 every card on a given group shares the same
+        /// <see cref="GroupMeetingLocationBag.MapUrl"/> pointing at
+        /// <c>GroupMapPage?GroupId={IdKey}</c>.
+        /// </summary>
+        private List<GroupMeetingLocationBag> BuildMeetingLocations( Model.Group entity )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                return new List<GroupMeetingLocationBag>();
+            }
+
+            var groupLocations = new GroupLocationService( RockContext ).Queryable()
+                .AsNoTracking()
+                .Include( gl => gl.Location )
+                .Include( gl => gl.Schedules )
+                .Where( gl => gl.GroupId == entity.Id )
+                .OrderBy( gl => gl.Order )
+                .ThenBy( gl => gl.Id )
+                .ToList();
+
+            if ( !groupLocations.Any() )
+            {
+                return new List<GroupMeetingLocationBag>();
+            }
+
+            var showAddresses = GetAttributeValue( AttributeKey.ShowLocationAddresses ).AsBoolean( true );
+
+            // Q2.3: per-card MapUrl is the same group-level URL across all
+            // cards on this group. Build once with the entity's IdKey
+            // substituted (per Q4 outbound IdKey policy) so the Vue layer
+            // doesn't need to substitute.
+            var mapUrl = this.GetLinkedPageUrl(
+                AttributeKey.GroupMapPage,
+                new Dictionary<string, string>
+                {
+                    [PageParameterKey.GroupId] = entity.IdKey
+                } );
+
+            return groupLocations
+                .Select( gl => BuildMeetingLocationBag( gl, showAddresses, mapUrl ) )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Materializes one <see cref="GroupMeetingLocationBag"/> from a
+        /// <see cref="GroupLocation"/>, applying the four-mode
+        /// classification and the <c>ShowLocationAddresses</c> gate. The
+        /// <c>MapData</c> field carries raw Well-Known Text that
+        /// <c>@Obsidian/Utility/geo</c>'s <c>wellKnownToCoordinates</c>
+        /// parses on the Vue side.
+        /// </summary>
+        private static GroupMeetingLocationBag BuildMeetingLocationBag( GroupLocation gl, bool showAddresses, string mapUrl )
+        {
+            var location = gl.Location;
+            var hasGeoFence = location?.GeoFence != null;
+            var hasGeoPoint = location?.GeoPoint != null;
+
+            // GroupMember > Polygon > Point > Address. The classification
+            // matches the WebForms research (07-locations-and-schedules.md):
+            // GroupMember is set by the Member tab regardless of the
+            // underlying Location's geo state, so it takes priority over
+            // the geo-derived modes.
+            GroupLocationPickerMode mode;
+            if ( gl.GroupMemberPersonAliasId.HasValue )
+            {
+                mode = GroupLocationPickerMode.GroupMember;
+            }
+            else if ( hasGeoFence )
+            {
+                mode = GroupLocationPickerMode.Polygon;
+            }
+            else if ( hasGeoPoint )
+            {
+                mode = GroupLocationPickerMode.Point;
+            }
+            else
+            {
+                mode = GroupLocationPickerMode.Address;
+            }
+
+            // Polygon cards never render an address (the design renders the
+            // shape itself plus a "Geofenced Location" label). Other modes
+            // render the formatted address conditional on the
+            // ShowLocationAddresses block attribute.
+            string address = null;
+            if ( mode != GroupLocationPickerMode.Polygon && showAddresses )
+            {
+                address = location?.FormattedAddress;
+            }
+
+            // Polygon cards use the GeoFence WKT; everything else uses the
+            // GeoPoint WKT. Empty string when no geo data is available -
+            // the Vue side renders the map but no marker / shape.
+            string mapData;
+            if ( mode == GroupLocationPickerMode.Polygon )
+            {
+                mapData = location?.GeoFence?.AsText() ?? string.Empty;
+            }
+            else
+            {
+                mapData = location?.GeoPoint?.AsText() ?? string.Empty;
+            }
+
+            // Schedule text takes the first attached schedule's friendly
+            // text. Multi-schedule locations show only the first per the
+            // captured design; the editing-side Phase 6 surface manages
+            // the full schedule list.
+            var scheduleText = gl.Schedules
+                .OrderBy( s => s.Order )
+                .ThenBy( s => s.Id )
+                .Select( s => s.FriendlyScheduleText )
+                .FirstOrDefault( t => t.IsNotNullOrWhiteSpace() );
+
+            return new GroupMeetingLocationBag
+            {
+                Guid = gl.Guid,
+                Name = location?.Name,
+                Address = address,
+                ScheduleText = scheduleText,
+                Mode = mode,
+                MapData = mapData,
+                MapUrl = mapUrl
             };
         }
 

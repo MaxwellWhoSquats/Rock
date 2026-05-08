@@ -7,7 +7,9 @@
     <DetailBlock v-if="!blockError"
                  v-model:mode="panelMode"
                  :name="panelName"
+                 :titleIconCssClass="panelTitleIconCssClass"
                  :labels="blockLabels"
+                 :headerLabels="headerLabels"
                  :entityKey="entityKey"
                  :entityTypeGuid="entityTypeGuid"
                  :entityTypeName="entityTypeName"
@@ -91,6 +93,13 @@
 
     const panelName = computed((): string => groupViewBag.value?.name ?? "");
 
+    /**
+     * GroupType.IconCssClass surfaced as the panel title icon. Empty
+     * string falls back to no icon (DetailBlock leaves the slot empty
+     * in view mode by default).
+     */
+    const panelTitleIconCssClass = computed((): string => groupViewBag.value?.iconCssClass ?? "");
+
     const entityKey = computed((): string => groupViewBag.value?.idKey ?? "");
 
     const entityTypeGuid = computed((): string | undefined => config.entityTypeGuid ?? undefined);
@@ -106,10 +115,11 @@
     const isTagListShown = computed((): boolean => options.value.isTagListShown === true);
 
     /**
-     * Labels rendered as chips next to the title (or in the subheader,
-     * depending on showLabelsInHeader). Phase 1 surfaces GroupType,
-     * Campus, Public, Relationship Strength, plus the standard state
-     * labels (Inactive, Archived).
+     * Labels rendered in the panel sub-header. Phase 1 surfaces the
+     * lifecycle / context labels (Archived, Inactive, Relationship
+     * Strength, Public). The GroupType and Campus chips are split off
+     * into <c>headerLabels</c> so they render next to the panel title
+     * per the figma.
      */
     const blockLabels = computed((): PanelAction[] => {
         if (panelMode.value !== DetailPanelMode.View) {
@@ -134,11 +144,35 @@
             }
         }
 
+        if (bag.isPublic) {
+            labels.push({ title: "Public", type: "info" });
+        }
+
+        return labels;
+    });
+
+    /**
+     * Labels rendered next to the panel title (header). GroupType is
+     * tinted by GroupType.GroupTypeColor when set; Campus uses Rock's
+     * .label-campus outlined style.
+     */
+    const headerLabels = computed((): PanelAction[] => {
+        if (panelMode.value !== DetailPanelMode.View) {
+            return [];
+        }
+
+        const labels: PanelAction[] = [];
+        const bag = groupViewBag.value;
+
         if (bag.groupType?.name) {
             const groupTypeUrl = bag.groupType.url;
+            const groupTypeColor = bag.groupType.color;
             labels.push({
                 title: bag.groupType.name,
-                type: "default",
+                type: "campus",
+                style: groupTypeColor
+                    ? `color: ${groupTypeColor}; border-color: ${groupTypeColor};`
+                    : undefined,
                 handler: groupTypeUrl
                     ? () => {
                         window.location.href = groupTypeUrl;
@@ -148,11 +182,7 @@
         }
 
         if (bag.campusName) {
-            labels.push({ title: bag.campusName, type: "default" });
-        }
-
-        if (bag.isPublic) {
-            labels.push({ title: "Public", type: "info" });
+            labels.push({ title: bag.campusName, type: "campus" });
         }
 
         return labels;
@@ -168,7 +198,8 @@
 
         if (panelMode.value === DetailPanelMode.View && options.value.isCopyButtonShown) {
             actions.push({
-                title: "Copy",
+                iconCssClass: "ti ti-copy",
+                title: "Copy Group",
                 type: "default",
                 handler: openCopyModal
             });
@@ -189,7 +220,7 @@
         if (panelMode.value === DetailPanelMode.View && options.value.isArchiveVisible) {
             actions.push({
                 title: "Archive",
-                type: "danger",
+                type: "link",
                 handler: onArchiveClick
             });
         }

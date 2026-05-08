@@ -15,6 +15,8 @@
 // </copyright>
 //
 
+using System.Collections.Generic;
+
 using Rock.ViewModels.Utility;
 
 using RelationshipStrength = Rock.Enums.Group.RelationshipStrength;
@@ -86,9 +88,10 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
 
         /// <summary>
         /// Gets or sets the URL of the 16:9 hero image at the top of the
-        /// Overview card. Always null in Phase 1 because the
-        /// <c>Group.PhotoId</c> column ships in Phase 2 (per Q8). The
-        /// Vue layer omits the hero region entirely when this is null.
+        /// Overview card, populated from <c>Group.PhotoUrl</c> (which
+        /// resolves <c>Group.PhotoId</c> through <c>FileUrlHelper</c>).
+        /// Null when the group has no photo set; the Vue layer omits the
+        /// hero region entirely in that case (no placeholder, per design).
         /// </summary>
         public string PhotoUrl { get; set; }
 
@@ -124,30 +127,6 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// </summary>
         public int? GroupCapacity { get; set; }
 
-        /// <summary>
-        /// Gets or sets the value of the <em>Goal</em> group attribute, if
-        /// configured. Rendered in the Overview card.
-        /// </summary>
-        public string GroupGoal { get; set; }
-
-        /// <summary>
-        /// Gets or sets the value of the <em>Neighborhood</em> group
-        /// attribute, if configured.
-        /// </summary>
-        public string Neighborhood { get; set; }
-
-        /// <summary>
-        /// Gets or sets the value of the <em>Privacy</em> (private or
-        /// public space) group attribute, if configured.
-        /// </summary>
-        public string Privacy { get; set; }
-
-        /// <summary>
-        /// Gets or sets the value of the <em>Group Preference</em> group
-        /// attribute, if configured.
-        /// </summary>
-        public string GroupPreference { get; set; }
-
         #endregion
 
         #region Linkages
@@ -158,6 +137,36 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// linkages of any kind, which omits the section entirely.
         /// </summary>
         public GroupLinkagesBag Linkages { get; set; }
+
+        #endregion
+
+        #region Meeting Locations
+
+        /// <summary>
+        /// Gets or sets the per-<c>GroupLocation</c> meeting location
+        /// cards rendered on the right rail of the View panel. Always
+        /// emitted; the Vue layer uses a <c>v-if</c> on
+        /// <c>length &gt; 0</c> to omit the entire card when the group
+        /// has no locations. Each entry renders as one 16:9 map card with
+        /// optional address and schedule below.
+        /// </summary>
+        public List<GroupMeetingLocationBag> MeetingLocations { get; set; }
+
+        #endregion
+
+        #region View-mode Notifications
+
+        /// <summary>
+        /// Gets or sets the role-limit warning HTML rendered in the view
+        /// panel's top notification surface when one or more
+        /// <c>GroupTypeRole</c>s violate their <c>MinCount</c> /
+        /// <c>MaxCount</c> against the group's current active member
+        /// counts. Null / empty hides the notification. Populated from
+        /// <c>Group.GetGroupTypeRoleLimitWarnings(out string)</c>;
+        /// mirrors the WebForms <c>nbRoleLimitWarning</c> at
+        /// <c>GroupDetail.ascx.cs:1849-1851</c>.
+        /// </summary>
+        public string RoleLimitWarning { get; set; }
 
         #endregion
 
