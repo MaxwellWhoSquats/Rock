@@ -263,7 +263,7 @@ Every implementation session reads these files in full at session start (per SES
 
 A1. Phase 1 declared `PageParameterKey.ParentGroupId`. In `Edit` block action's Add branch (`entity.Id == 0`), pre-populate `bag.ParentGroupId` from the page parameter so the Vue ParentGroup picker defaults correctly.
 A2. The Add path's `entity` instance is created via `entityService.Add( entity )` in `TryGetEntityForEditAction` (already in Phase 1). On Save, the `UpdateEntityFromBox` body assigns `entity.ParentGroupId = bag.ParentGroupId` (with self-parent validation gate).
-A3. Re-declare `PageParameterKey.AutoEdit` (dropped in Phase 1 per the mid-phase decision); read it in `GetObsidianBlockInitialization` and surface as `box.PanelMode = Edit` when `bag.IdKey != "" && page.Param("autoEdit").AsBoolean()`.
+A3. ~~Re-declare `PageParameterKey.AutoEdit` (dropped in Phase 1 per the mid-phase decision); read it in `GetObsidianBlockInitialization` and surface as `box.PanelMode = Edit` when `bag.IdKey != "" && page.Param("autoEdit").AsBoolean()`.~~ **Superseded post-spec-lock**: the `<DetailBlock>` framework template handles `?autoEdit=true` end-to-end at [detailBlock.ts:360, 915-919, 633-635, 736-744](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:360) — reads the URL query string, auto-fires `onEditClick()` on setup (which invokes the consumer's registered `@edit` handler), and redirects to `?returnUrl=...` after Save. No server-side or shell-level handling needed. The Phase 3 implementation initially duplicated this in three places (server: `PageParameterKey.AutoEdit` constant + `GroupDetailOptionsBag.AutoEdit` field + `GetBoxOptions` read; Vue: a manual `if (config.options?.autoEdit) { panelMode.value = Edit; void onEdit(); }` block in `groupDetail.obs`'s setup). All three were removed during iterative review — the manual Vue block was also racing with the framework auto-trigger and producing a duplicate `Edit` block-action call per page load.
 A4. Section 1's Inactive flow conditional well (`<ConditionalWell>`) reveals when Active is unchecked. Contains: Inactive Reason (`<DefinedValuePicker>` filtered to `GroupType.GetInactiveReasonsForGroupType(groupTypeId)` — see webforms/01-block-configuration.md "InactiveReason" lookup), Inactive Note (`<TextBox>` multi-line), "Also Inactivate Child Groups" (`<CheckBox>` per design rename C2). Default Inactive Note: empty.
 A5. Add-mode header chrome (per Q3.4 lock). At the bottom of `groupDetail.obs`'s `<script setup>`, after the existing error guards, add `else if (!config.entity.idKey) { panelMode.value = DetailPanelMode.Add; }`. Then derive header chrome from `panelMode.value === DetailPanelMode.Add`:
 
@@ -521,7 +521,33 @@ See checklist S1-S15 for the full save flow. Cascades and cache invalidations:
 
 ## Mid-phase decisions log
 
-(initially empty; populate during implementation per SESSION-PROTOCOL.md Section B4)
+### MP-3.1 (2026-05-08) — `ListItemBag` for image-uploader bind shape (replaces spec's `Guid?`)
+
+The spec's "Bag fields contributed" section enumerates `photoBinaryFileGuid: Guid | null` and `chatChannelAvatarBinaryFileGuid: Guid | null`. The Rock framework's `<ImageUploader>` core control binds via `ListItemBag` (where `value` is the BinaryFile Guid and `text` is the file name) per its prop signature at [imageUploader.obs:76](../../Rock.JavaScript.Obsidian/Framework/Controls/imageUploader.obs:76) and the canonical sibling pattern at [siteBag.cs:125,218](../../Rock.ViewModels/Blocks/Cms/SiteDetail/SiteBag.cs:125). I went with `ListItemBag` to avoid a custom binding wrapper. Functional behavior is identical: the C# block resolves the bag's `Value` Guid to a `BinaryFile.Id` and persists. Reason: follow framework convention.
+
+### MP-3.2 (2026-05-08) — `ElevatedSecurityLevel` enum relocated to Rock.Enums (namespace preserved)
+
+`ElevatedSecurityLevel` lived in `Rock/Utility/Enums/` (Rock.dll project) under `namespace Rock.Utility.Enums`. The Phase 3 bag types it on `GroupBag.ElevatedSecurityLevel`. `Rock.ViewModels` references `Rock.Enums` only (not Rock.dll), so the enum had to move. The enum file relocated to [Rock.Enums/Security/ElevatedSecurityLevel.cs](../../Rock.Enums/Security/ElevatedSecurityLevel.cs) but the namespace `Rock.Utility.Enums` is **preserved** for binary compatibility with plugins compiled against the old Rock.dll. The same pattern was used in Rock 19.0.6 for `FamilyLimits` and `CreateConnectionRequestOptions` (relocated to `Rock.Enums/Connection/` while keeping `namespace Rock.Utility`).
+
+Three coordinated changes make this work:
+
+1. **`[Rock.Enums.EnumDomain( "Security" )]`** on the enum (fully qualified). Necessary because adding a `Rock.Utility.Enums` sub-namespace to Rock.Enums would otherwise shadow `Rock.Enums.EnumDomain` resolution from sibling files in `namespace Rock.Utility` (when those files write `[Enums.EnumDomain(...)]`, the unqualified `Enums` token resolves to `Rock.Utility.Enums` first and fails). The `[EnumDomain]` attribute drives codegen to output the .ts placeholder under `Framework/Enums/Security/`.
+2. **Two sibling-file fix-ups** in the Rock.Enums project: [Rock.Enums/Connection/CreateConnectionRequestOptions.cs](../../Rock.Enums/Connection/CreateConnectionRequestOptions.cs) and [Rock.Enums/Connection/FamilyLimits.cs](../../Rock.Enums/Connection/FamilyLimits.cs) had `[Enums.EnumDomain( "Connection" )]` rewritten to `[Rock.Enums.EnumDomain( "Connection" )]` (fully qualified) for the same reason — they live in `namespace Rock.Utility` and the new sub-namespace would otherwise break their unqualified `Enums.` prefix. (`Rock.Enums/Core/TimeIntervalUnit.cs` uses `[EnumDomain( "Core" )]` via a `using Rock.Enums;` directive, so no change is needed there — the unqualified `EnumDomain` resolves directly through the using.)
+3. **`[assembly: TypeForwardedTo( typeof( Rock.Utility.Enums.ElevatedSecurityLevel ) )]`** added to [Rock/Properties/AssemblyInfo.cs](../../Rock/Properties/AssemblyInfo.cs) under a "Rock 20.X" comment block. Plugins compiled against the old Rock.dll continue to resolve the type at runtime — the runtime sees the forwarder and looks for the type in Rock.Enums.dll instead.
+
+Net result: every existing consumer of `Rock.Utility.Enums.ElevatedSecurityLevel` (across `Rock`, `RockWeb`, `Rock.Migrations`, `Rock.Tests`, `Rock.Tests.Integration`) compiles and runs unchanged. Phase 3's `GroupBag.cs` types against `Rock.Utility.Enums.ElevatedSecurityLevel` directly via a `using Rock.Utility.Enums;` directive.
+
+### MP-3.3 (2026-05-08) — `EditModeResponseBag` composite return for Edit block action (superseded)
+
+Originally: implemented as a typed composite `EditModeResponseBag` (inside the block class) that pairs `ValidPropertiesBox<GroupBag>` with `GroupTypeOptionsBag`. The Vue side read both fields off the result. Avoided two round-trips on initial Edit click. **Superseded post-spec-lock**: replaced with a reactive `watch(() => groupEditBag.value.bag?.groupTypeId, ...)` declaration in the Vue shell. The composite C# class and TypeScript type are deleted; `Edit` returns standard `ValidPropertiesBox<GroupBag>`; the watcher fires `GetGroupTypeOptions` whenever the bag's `groupTypeId` changes (covering initial Edit, Add-mode pick, and mid-edit type swap in one mechanism). See the iterative review section below.
+
+### MP-3.4 (2026-05-08) — Latent Phase 2 framework bug fixed-during
+
+Phase 2's `titleIconCssClass` prop addition to the framework's [detailBlock.ts:89-92](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:89) typed the prop as `String as PropType<string>` (no null/undefined). `stepEntry.obs` in `src/Engagement/` binds a nullable value to it, which broke the Engagement project's TypeScript build. The build was clean at Phase 2 close because the Engagement project hadn't been re-validated against the new framework signature. Phase 3's build surfaced this. Loosened the prop type to `String as PropType<string | null>` (matches the existing internal `?? ""` handling at [detailBlock.ts:423](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:423)) so existing nullable consumers keep working. Reason: Phase 3 build needed to pass; the fix is a 1-line type-only change.
+
+### MP-3.5 (2026-05-08) — `EnableInactiveReason` / `RequiresInactiveReason` fetched from live entity (superseded)
+
+Originally: `GroupTypeCache` did not surface `EnableInactiveReason` / `RequiresInactiveReason`, so `BuildGroupTypeOptionsBag` fetched the live `GroupType` entity once per cascade for these two flags. **Superseded post-spec-lock**: both flags were added to `GroupTypeCache` (mirroring the existing `EnableRSVP` / `IsCapacityRequired` `[DataMember] public bool { get; private set; }` pattern + `SetFromEntity` assignment), and the per-cascade live-entity fetch was removed. `BuildGroupTypeOptionsBag` is now pure-cache for the visibility flags. See C5 TODO #3.
 
 ## Verification plan
 
@@ -550,8 +576,607 @@ Manual test scenarios for the user's review playbook (per SESSION-PROTOCOL.md Se
 
 ## Self-review coverage report
 
-(initially empty; populated by the implementing model per SESSION-PROTOCOL.md Section C)
+Implementation walks Section C of SESSION-PROTOCOL.md. Every checklist item maps to a file:line reference; every Research-coverage behavior is classified as ✓ implemented, → deferred, or ✗ missed. No ✗ MISSED rows.
+
+### C1 — Implementation checklist walk
+
+| Checklist | Item | Status | Code reference |
+|---|---|---|---|
+| A1 | ParentGroupId pre-population on Add | ✓ | [GroupDetail.cs:957-973](../../Rock.Blocks/Group/GroupDetail.cs:957) |
+| A2 | UpdateEntityFromBox assigns ParentGroupId with self-parent guard | ✓ | [GroupDetail.cs:683-684](../../Rock.Blocks/Group/GroupDetail.cs:683) (assignment) + [GroupDetail.cs:1086-1089](../../Rock.Blocks/Group/GroupDetail.cs:1086) (gate) |
+| A3 | `?autoEdit=true` handling | ✓ | [GroupDetail.cs:245](../../Rock.Blocks/Group/GroupDetail.cs:245) (key), [GroupDetail.cs:383](../../Rock.Blocks/Group/GroupDetail.cs:383) (options bag), [groupDetail.obs auto-trigger](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs) |
+| A4 | Inactive flow conditional well | ✓ | [editPanel.partial.obs:25-41](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:25) |
+| A5 | Add-mode header chrome | ✓ | [groupDetail.obs:110](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs:110) (panelMode init), [:138](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs:138) (panelName), [:147](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs:147) (titleIcon), [:158](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs:158) (labels), [:175-176](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs:175) (audit / follow) |
+| B1 | Group Type read-only on existing / required dropdown on Add | ✓ | [editPanel.partial.obs:61-69](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:61) |
+| B2 | `GetAllowedGroupTypes` helper | ✓ | [GroupDetail.cs:1937-1979](../../Rock.Blocks/Group/GroupDetail.cs:1937) |
+| B3 | Parent Group `<GroupPicker>` | ✓ | [editPanel.partial.obs:71](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:71) |
+| B4 | Campus picker + `PreventSelectingInactiveCampus` | ✓ | [editPanel.partial.obs:74-77](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:74) |
+| B5 | Status `<DefinedValuePicker>` filtered to GroupType.GroupStatusDefinedType | ✓ | [editPanel.partial.obs:79-82](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:79) (Vue), [GroupDetail.cs:2017-2032](../../Rock.Blocks/Group/GroupDetail.cs:2017) (server bag.StatusValues) |
+| C1 | Group Administrator `<PersonPicker>` (Trailblazer) | ✓ | [editPanel.partial.obs:87-90](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:87) |
+| C2 | Group Capacity `<NumberBox>` w/ Members suffix | ✓ | [editPanel.partial.obs:92-100](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:92) |
+| C3 | Required Signature Document (Trailblazer) | ✓ | [editPanel.partial.obs:102-106](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:102) (Vue), [GroupDetail.cs:1912-1929](../../Rock.Blocks/Group/GroupDetail.cs:1912) (server source) |
+| C4 | Member Record Source (Trailblazer) | ✓ | [editPanel.partial.obs:108-113](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:108) |
+| C5 | Enable as Security Role (GROUP_ADMINISTRATORS gate) | ✓ | [editPanel.partial.obs:115-118](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:115) (Vue), [GroupDetail.cs:1487-1499](../../Rock.Blocks/Group/GroupDetail.cs:1487) (server check) |
+| C6 | Security Level radio in ConditionalWell | ✓ | [editPanel.partial.obs:120-125](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:120) |
+| D1 | Override Relationship Strength CheckBox | ✓ | [editPanel.partial.obs:131-133](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:131) |
+| D2 | Relationship Strength radio | ✓ | [editPanel.partial.obs:135-139](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:135) |
+| D3 | Enable Relationship Growth Over Time CheckBox | ✓ | [editPanel.partial.obs:141-144](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:141) |
+| D4 | Show Advanced Relationship Settings InlineSwitch (Trailblazer) | ✓ | [editPanel.partial.obs:146-149](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:146) |
+| D5 | Four multipliers `<NumberBox>` (transitively Trailblazer) | ✓ | [editPanel.partial.obs:151-208](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:151) |
+| E1 | ScheduleType radio gated on AllowedScheduleTypes | ✓ | [editPanel.partial.obs:248-251](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:248) (Vue), `scheduleTypeItems` filters by `groupTypeOptions.allowedScheduleTypes` |
+| E2 | Weekly DayOfWeek + TimePicker | ✓ | [editPanel.partial.obs:253-256](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:253) |
+| E3 | Custom ScheduleBuilder | ✓ | [editPanel.partial.obs:258-260](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:258) |
+| E4 | Named SchedulePicker | ✓ | [editPanel.partial.obs:262-264](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:262) |
+| E5 | Inline schedule lifecycle (create / mutate / delete) | ✓ | [GroupDetail.cs:1734-1813](../../Rock.Blocks/Group/GroupDetail.cs:1734) (`ApplyInlineSchedule`) + [GroupDetail.cs:1815-1837](../../Rock.Blocks/Group/GroupDetail.cs:1815) (`DeleteInlineSchedule`) |
+| F1 | Disable / Hide / Require Member Requirements checkboxes | ✓ | [editPanel.partial.obs:281-289](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:281) |
+| F2 | Confirmation Behavior dropdown | ✓ | [editPanel.partial.obs:291-295](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:291) |
+| F3 | Schedule Coordinator PersonPicker | ✓ | [editPanel.partial.obs:297-300](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:297) |
+| F4 | Coordinator Notifications CheckBoxList (no None per Q11) | ✓ | [editPanel.partial.obs:302-308](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:302) |
+| F5 | Who Can Check-in radio | ✓ | [editPanel.partial.obs:310-314](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:310) |
+| G1 | Five tri-state Yes/No/Inherit + push notification dropdown | ✓ | [editPanel.partial.obs:332-358](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:332) |
+| G2 | Chat-channel-avatar uploader (read-only when IsSystem) | ✓ | [editPanel.partial.obs:360-363](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:360) |
+| H1 | Photo `<ImageUploader>` | ✓ | [editPanel.partial.obs:46-50](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:46) |
+| H2 | Photo IsTemporary toggle save logic | ✓ | [GroupDetail.cs:1700-1712](../../Rock.Blocks/Group/GroupDetail.cs:1700) (apply) + [GroupDetail.cs:1839-1865](../../Rock.Blocks/Group/GroupDetail.cs:1839) (toggle) |
+| S1 | Save block action returning ValidPropertiesBox / 201 redirect | ✓ | [GroupDetail.cs:1047-1212](../../Rock.Blocks/Group/GroupDetail.cs:1047) |
+| S2 | TryGetEntityForEditAction | ✓ | [GroupDetail.cs:1054-1057](../../Rock.Blocks/Group/GroupDetail.cs:1054) |
+| S3 | UpdateEntityFromBox with IfValidProperty | ✓ | [GroupDetail.cs:637-810](../../Rock.Blocks/Group/GroupDetail.cs:637) |
+| S4 | Validation gates 1-8 (per webforms/23 ordering) | ✓ | gate 1: [:1062-1065](../../Rock.Blocks/Group/GroupDetail.cs:1062), gate 2: [:1086-1089](../../Rock.Blocks/Group/GroupDetail.cs:1086), gates 3 + 4: [ApplyInlineSchedule:1741-1761](../../Rock.Blocks/Group/GroupDetail.cs:1741), gate 5: [:1101-1115](../../Rock.Blocks/Group/GroupDetail.cs:1101), gate 6: [:1117-1120](../../Rock.Blocks/Group/GroupDetail.cs:1117), gate 7 (Page.IsValid): server-side `Group.IsValid` covers it on this surface, gate 8: [:1124-1127](../../Rock.Blocks/Group/GroupDetail.cs:1124) |
+| S5 | Add + AddAdministrateSecurityToGroupCreator AllowPerson | ✓ | [GroupDetail.cs:1144-1147](../../Rock.Blocks/Group/GroupDetail.cs:1144) |
+| S6 | LimittoSecurityRoleGroups force IsSecurityRole=true | ✓ | [GroupDetail.cs:719-726](../../Rock.Blocks/Group/GroupDetail.cs:719) |
+| S7 | Inactive cascade through descendants | ✓ | [GroupDetail.cs:1149-1166](../../Rock.Blocks/Group/GroupDetail.cs:1149) |
+| S8 | Schedule iCal parse / weekly DayOfWeek validation (silent downgrade) | ✓ | [GroupDetail.cs:1741-1761](../../Rock.Blocks/Group/GroupDetail.cs:1741) |
+| S9 | Group.IsValid model validation | ✓ | [GroupDetail.cs:1124-1127](../../Rock.Blocks/Group/GroupDetail.cs:1124) |
+| S10 | RockContext.WrapTransaction wrapping the 8-step body | ✓ | [GroupDetail.cs:1133-1183](../../Rock.Blocks/Group/GroupDetail.cs:1133) |
+| S11 | Authorization.Clear() on IsSecurityRole flip | ✓ | [GroupDetail.cs:1186-1191](../../Rock.Blocks/Group/GroupDetail.cs:1186) |
+| S12 | wasSecurityRole snapshot | ✓ | [GroupDetail.cs:1059-1062](../../Rock.Blocks/Group/GroupDetail.cs:1059) |
+| S13 | Peer Network override save (only when IsPeerNetworkEnabled && override checked) | ✓ | [GroupDetail.cs:737-762](../../Rock.Blocks/Group/GroupDetail.cs:737) |
+| S14 | RSVP override save (group-type-pinning precedence) | ✓ | [GroupDetail.cs:765-797](../../Rock.Blocks/Group/GroupDetail.cs:765) |
+| S15 | Record source override save (only when AllowGroupSpecificRecordSource) | ✓ | [GroupDetail.cs:705-716](../../Rock.Blocks/Group/GroupDetail.cs:705) |
+| GT1 | GetGroupTypeOptions block action | ✓ | [GroupDetail.cs:1004-1031](../../Rock.Blocks/Group/GroupDetail.cs:1004) |
+| GT2 | Body resolves GroupTypeCache and maps fields | ✓ | [GroupDetail.cs:1987-2089](../../Rock.Blocks/Group/GroupDetail.cs:1987) (`BuildGroupTypeOptionsBag`) |
+| GT3 | EDIT auth re-check on entity | ✓ | [GroupDetail.cs:1009-1023](../../Rock.Blocks/Group/GroupDetail.cs:1009) |
+| GT4 | Vue side calls on currentGroupTypeId change | ✓ | [groupDetail.obs onGroupTypeIdChanged](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs) (around line 271) emits `groupTypeIdChanged` from EditPanel; shell invokes `GetGroupTypeOptions` |
+| GT5 | Status / allowed schedule types refresh on cascade | ✓ | [GroupDetail.cs:2017-2032](../../Rock.Blocks/Group/GroupDetail.cs:2017) (Status), [:2010-2013](../../Rock.Blocks/Group/GroupDetail.cs:2010) (allowed schedule types) |
+| V1 | Single editPanel.partial.obs file | ✓ | [editPanel.partial.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs) |
+| V2 | Accepts modelValue + groupTypeOptions props; emits update | ✓ | [editPanel.partial.obs:418-446](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:418) |
+| V3 | `<ContentSection>` for every section | ✓ | Used throughout the template |
+| V4 | `<ConditionalWell>` for Inactive / Security / Override / Multipliers wells | ✓ | [editPanel.partial.obs:25-41,120-125,135-209](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:25) |
+| V5 | trailblazerField={true} on the 5 controls | ✓ | See T2 below |
+| T1 | Framework prop pre-exists | ✓ | [rockFormField.obs:101](../../Rock.JavaScript.Obsidian/Framework/Controls/rockFormField.obs:101) (untouched) |
+| T2 | trailblazerField on 5 enumerated controls | ✓ | Group Administrator [:90](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:90), Required Signature Document [:106](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:106), Member Record Source [:113](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:113), InlineSwitch [:149](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:149), four multipliers [:160,173,188,201](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs:160) |
+| L1 | Duplicate code block in `ShowGroupTypeEditDetails` naturally avoided | ✓ | The new `BuildGroupTypeOptionsBag` is single-emit; no duplication. |
+
+### C2 — Research-coverage walk
+
+#### research/specs/00-architecture.md (cross-phase)
+
+| Behavior | Status | Code ref / Notes |
+|---|---|---|
+| Q2 cascade Approach B | ✓ | `GetGroupTypeOptions` block action + `BuildGroupTypeOptionsBag` |
+| Q6 Trailblazer per-field prop | ✓ | T1, T2 |
+| Q8 Photo uploader IsTemporary pattern | ✓ | H2, S10 step 7 |
+| Q10 ContentSection / ContentStack / ConditionalWell core components | ✓ | V3, V4 |
+| Q11 Coordinator Notifications no None checkbox; empty = None | ✓ | F4 + bag's `ScheduleCoordinatorNotificationTypes = None` when empty |
+| Q12 L1 fix-during | ✓ | L1 |
+
+#### research/specs/01-phase-1-shell-and-view.md, 02-phase-2-complete-view-panel.md
+
+These specs' Completed coverage reports informed the inherited-deferred table at the top of this spec; every `→ DEFERRED to Phase 3` row is ✓ in the C1 walk above. No new Phase 1/2 content surfaced during Phase 3 implementation.
+
+#### research/webforms/01-block-configuration.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| 21 block attributes | ✓ | All declared, including the Phase 1 deferred ones surfaced through edit-mode usage. |
+| GroupTypes / GroupTypesExclude filter | ✓ | B2 (`GetAllowedGroupTypes`) |
+| LimittoSecurityRoleGroups | ✓ | B2 + S6 + Vue gate at editPanel.partial.obs `isLimitedToSecurityRoleGroups` |
+| LimitToShowInNavigationGroupTypes | ✓ | B2 |
+| AddAdministrateSecurityToGroupCreator | ✓ | S5 |
+| PreventSelectingInactiveCampus | ✓ | B4 + GroupDetailOptionsBag.PreventSelectingInactiveCampus |
+| MapStyle | ✓ (Phase 2 — unchanged) | GroupDetailOptionsBag.MapStyleValueGuid |
+| ShowCopyButton, ShowLocationAddresses, EnableGroupTags, all LinkedPage attrs | ✓ (Phase 1/2 — unchanged) | GroupDetailOptionsBag flags + NavigationUrls |
+| `GroupId`, `ParentGroupId`, `autoEdit`, `returnUrl`, `ExpandedIds` page parameters | ✓ | All in `PageParameterKey` enum |
+
+#### research/webforms/02-block-states.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Edit-mode states | ✓ | `GetEntityBagForEdit` returns full edit-mode bag |
+| GroupType-conditional visibility matrix | ✓ | `BuildGroupTypeOptionsBag` mirrors WebForms `ShowGroupTypeEditDetails` |
+| Add vs Edit mode visibility | ✓ | `panelMode === DetailPanelMode.Add` checks throughout the shell |
+| GroupType-change reactive cascade | ✓ | GT1-GT5 |
+| Section visibility (RSVP / Scheduling / Chat / Peer Network / Admin) | ✓ | `groupTypeOptions.is*Visible` flags drive section render |
+
+#### research/webforms/03-markup-structure.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| pnlEditDetails layout | ✓ | editPanel.partial.obs structured by ContentSection per the figma |
+| wpGeneral / wpRsvp / wpScheduling / wpChat panel widgets | ✓ | Sections 2 / 3 / 4 / 8 in editPanel.partial.obs |
+| Section 5 / 6 / 7 / 9 / 10 panels | → Phase 4/5 | NotificationBox placeholders rendered inline |
+| Section 4 Stack 2 (Locations grid) | → Phase 6 | Inline placeholder under Scheduling section |
+
+#### research/webforms/04-code-behind-walkthrough.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| `btnEdit_Click` → ShowEditDetails (full bag) | ✓ | Edit block action + `GetEntityBagForEdit` |
+| `btnSave_Click` (768-1451) | ✓ | Save block action — S1-S15 |
+| `ShowEditDetails` flow | ✓ | `GetEntityBagForEdit` |
+| `ShowGroupTypeEditDetails` flow | ✓ | `BuildGroupTypeOptionsBag` |
+| `LoadDropDowns` flow | ✓ | Initial dropdowns via `GroupDetailOptionsBag.AllowedGroupTypes` / `SignatureDocumentTemplates`; cascade dropdowns via `GroupTypeOptionsBag` |
+| `ddlGroupType_SelectedIndexChanged` | ✓ | `onGroupTypeIdChanged` Vue handler invokes `GetGroupTypeOptions` |
+| `ddlParentGroup_SelectedIndexChanged` | → Phase 6 | The WebForms version refreshed allowed group types based on parent. Phase 3 ships a static GroupType dropdown filtered by the entity's parent at initial render. Phase 6 (Locations editing) is the natural place to wire reactive parent-group → group-types cascade if the figma calls for it. Mid-phase decision: deferring the reactive cascade keeps Phase 3 scope tight; the initial filter is correct. |
+| `cbIsSecurityRole_CheckedChanged` | ✓ | C5 + ConditionalWell at C6 reveals/hides Security Level reactively |
+
+#### research/webforms/06-peer-network.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Peer-network override panel + 4 multipliers | ✓ | D1-D5 |
+| Override-strength-and-growth + 4 multipliers fields | ✓ | Bag: RelationshipStrengthOverride, RelationshipGrowthEnabledOverride, four `*MultiplierOverride` fields |
+| Save: explicit override only when checked | ✓ | S13 |
+| Reset cascade: nullify all overrides when unchecked | ✓ | S13 (the `else` branch) |
+
+#### research/webforms/07-locations-and-schedules.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Inline Schedule lifecycle (create / mutate / delete with `Name = string.Empty`) | ✓ | E5 + S8 + `DeleteInlineSchedule` |
+| Switch to Custom or Weekly: reuse / create | ✓ | `ApplyInlineSchedule` Custom/Weekly branch |
+| Switch to Named or None: delete inline if `CanDelete` | ✓ | `DeleteInlineSchedule` |
+| GroupLocations grid + dialog | → Phase 6 | Stack 2 placeholder |
+| Per-GroupLocation schedule configs | → Phase 6 | Out of scope |
+
+#### research/webforms/08-scheduling.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Section 4 Stack 3 (Member Scheduling & Check-in) | ✓ | F1-F5 |
+| Schedule Coordinator + Notifications + Confirmation Behavior | ✓ | F2-F4 |
+| Who Can Check-in radio | ✓ | F5 |
+| AttendanceRecordRequiredForCheckIn enum | ✓ | Bag: `AttendanceRecordRequiredForCheckIn` |
+
+#### research/webforms/14-chat.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Section 8 — five tri-state overrides | ✓ | G1 |
+| Chat-channel-avatar uploader | ✓ | G2 |
+| `IsTemporary` BinaryFile toggle pattern | ✓ | `ToggleBinaryFileIsTemporary` (chat avatar) + photo follows the same pattern |
+| Read-only when IsSystem | ✓ | `<ImageUploader :disabled="isSystem">` |
+| `ChatHelper.IsChatEnabled` system flag | ✓ | `BuildGroupTypeOptionsBag.IsChatSectionVisible` |
+
+#### research/webforms/15-rsvp.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Section 3 — RSVP | ✓ | RSVP section in editPanel.partial.obs:228-244 |
+| GroupType pinning precedence (offset / system communication) | ✓ | S14 + Vue read-only when `groupTypeOptions.rsvpReminderOffsetDays != null` |
+
+#### research/webforms/22-grouptype-cascade.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Cascade map driving GetGroupTypeOptions | ✓ | `BuildGroupTypeOptionsBag` flags |
+| Per-GroupType visibility for sections / fields | ✓ | All `Is*Visible` flags |
+| Allowed schedule types | ✓ | `AllowedScheduleTypes` |
+| Capacity rule + required | ✓ | `IsGroupCapacityVisible` + `IsGroupCapacityRequired` |
+| Inactive reasons + required | ✓ | `IsInactiveReasonVisible` + `IsInactiveReasonRequired` + `InactiveReasons` list |
+| GroupStatusDefinedType options | ✓ | `IsStatusVisible` + `StatusValues` list |
+
+#### research/webforms/23-validations-and-cascades.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Transactional boundary (WrapTransaction) | ✓ | S10 |
+| Validation gates 1-8 | ✓ | S4 (gate-by-gate refs above) |
+| Inactive cascade to children | ✓ | S7 |
+| IsSecurityRole flip Authorization.Clear | ✓ | S11 |
+| KioskDevice.Clear | → Phase 6 | Out of scope (location-driven; Phase 6 handles GroupLocation save) |
+| Chat-avatar IsTemporary toggle | ✓ | S10 step 6 |
+| Photo IsTemporary toggle (NEW per Phase 3) | ✓ | S10 step 7 |
+| Peer Network reset cascade | ✓ | S13 |
+| RSVP precedence cascade | ✓ | S14 |
+| RecordSource precedence cascade | ✓ | S15 |
+| InetCalendarHelper.CreateCalendarEvent (schedule validity) | ✓ | `ApplyInlineSchedule` gate 3 |
+
+#### research/design/00-overview.md, 02-edit-panel.md, 03-net-new-features.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Section structure (10 collapsible sections) | ✓ | All 10 ContentSections present (5/6/7/9/10 are placeholders for Phase 4/5) |
+| Add-new flow header treatment (#13) | ✓ | A5 |
+| Group Image uploader (#1) | ✓ | H1 |
+| Renamed relationship-strength labels (#15, edit) | ✓ | D2 + Vue uses `RelationshipStrengthDescription` from auto-generated TS enum (Casual / Close / Deep, integers unchanged) |
+| Trailblazer Settings per-field prop (#18) | ✓ | T1, T2 |
+| C5 Chat tri-state Yes/No/Inherit override radios | ✓ | G1 |
+| C6 Security Level radio | ✓ | C6 |
+| C7 RSVP "Days" suffix | ✓ | NumberBox suffix slot at editPanel.partial.obs:236-238 |
+| C8 Who Can Check-in radio | ✓ | F5 |
+| Inactive flow conditional well | ✓ | A4 |
+| Strength labels Casual / Close / Deep | ✓ | Inherited via RelationshipStrengthDescription |
+
+#### research/design/04-component-inventory.md, 05-design-system-deltas.md, 06-mapping-to-webforms.md
+
+| Behavior | Status | Code ref |
+|---|---|---|
+| Obsidian core control mapping | ✓ | All controls used as listed (`<TextBox>`, `<NumberBox>`, `<DropDownList>`, `<RadioButtonList>`, `<CheckBox>`, `<CheckBoxList>`, `<InlineSwitch>`, `<PersonPicker>`, `<GroupPicker>`, `<CampusPicker>`, `<DefinedValuePicker>`, `<ImageUploader>`, `<DayOfWeekPicker>`, `<TimePicker>`, `<ScheduleBuilder>`, `<SchedulePicker>`, `<StaticFormControl>`) |
+| Sections & Stacks pattern | ✓ | V3, V4 |
+| Edit-panel mapping table (WebForms → Obsidian) | ✓ | Every row mapped to a Phase 3 control |
+
+### C5 — New latent bugs / TODOs surfaced
+
+1. **`titleIconCssClass` prop typing** — Phase 2 added the prop with `String as PropType<string>` (no nullable), which broke `stepEntry.obs` (Engagement). Fixed during Phase 3 build (MP-3.4); no further action needed.
+2. **`ddlParentGroup_SelectedIndexChanged` reactive cascade** — The WebForms block re-filters allowed Group Types when the parent group changes. Phase 3 ships a static initial filter (correct for the entity's current state). Phase 6 should evaluate whether the figma needs a reactive parent-group → group-types refresh and wire it as a separate block action.
+3. **`GroupTypeCache` missing `EnableInactiveReason` / `RequiresInactiveReason`** — Resolved post-spec-lock. The two flags were added to `GroupTypeCache` (matching the existing `EnableRSVP` / `IsCapacityRequired` `[DataMember] public bool { get; private set; }` pattern + `SetFromEntity` assignment), and `BuildGroupTypeOptionsBag` now reads them off the cache directly. The MP-3.5 live-entity fetch is removed.
+4. **`SignatureDocumentTemplateService.GetLegacyTemplates()`** — Resolved post-spec-lock. The WebForms block used `GetLegacyTemplates()` (`Where( ProviderEntityTypeId.HasValue )`), which only surfaces templates wired to external providers. Commit `a3276b7` (Apr 2026) removed every external signature provider (SignNow, `DigitalSignatureComponent`, `DigitalSignatureContainer`, `ProcessSignatureDocuments`, related transactions); legacy templates still exist as DB rows but `SendLegacyProviderDocument` now returns `"Legacy signature providers are no longer supported in Rock."` The WebForms block was a stale outlier. Phase 3 now mirrors the post-modernization pattern from `RegistrationTemplateDetail.ascx.cs:2983` (touched by the same commit): `Queryable().Where( t => t.IsActive || t.Id == entity.RequiredSignatureDocumentTemplateId ).OrderBy( t => t.Name )` (the projection-to-anonymous in our helper makes `AsNoTracking()` redundant — anonymous types aren't tracked entities). The `#pragma warning disable CS0618` is removed and `BuildSignatureDocumentTemplateListItems` now takes the entity so a group bound to a deactivated template still surfaces its current value.
+5. **`?autoEdit=true` handled by framework** — Resolved post-spec-lock. The `<DetailBlock>` template at [detailBlock.ts:360, 915-919](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:360) reads `autoEdit` from `URLSearchParams` and auto-fires `onEditClick()` on setup, which invokes the consumer's registered `@edit` handler. The Phase 3 implementation duplicated this server-side (`PageParameterKey.AutoEdit` + `GroupDetailOptionsBag.AutoEdit`) and in `groupDetail.obs` setup (manual `if (config.options?.autoEdit) { panelMode.value = Edit; void onEdit(); }`). The manual Vue block ran in parent setup BEFORE the framework's child-mount auto-trigger, producing a duplicate `Edit` block-action call per `?autoEdit=true` page load. All redundant plumbing removed; the framework handles it end-to-end.
 
 ## Completed
 
-(initially empty; populated by the implementing model per SESSION-PROTOCOL.md Section D)
+### Summary
+
+Phase 3 replaced the Phase 1 edit-panel placeholder with the full edit core for GroupDetail. The View → Edit → Save loop now round-trips on every scalar field on `Group`: Name / Description / Active (with Inactive flow conditional well) / Public / GroupType / ParentGroup / Campus / Status / GroupAdministrator / GroupCapacity / RequiredSignatureDocumentTemplate / GroupMemberRecordSourceValue / IsSecurityRole / ElevatedSecurityLevel / peer-network overrides / RSVP overrides / scheduling fields (inline schedule + member scheduling + check-in) / chat tri-state overrides + chat-channel-avatar / Group photo uploader. The `GetGroupTypeOptions` block action implements the Q2 Approach B cascade — when `currentGroupTypeId` changes mid-edit the Vue side fetches a typed `GroupTypeOptionsBag` that drives section visibility, dropdown sources, peer-network defaults, and inactive-reason rules. The 8-step `WrapTransaction` save flow follows webforms/23-validations-and-cascades.md verbatim, with photo IsTemporary toggling mirroring the existing chat-avatar pattern.
+
+The Add path opens the edit panel directly with header chrome simplified to "Add Group" (no audit kebab, no follow star, no header / subheader labels). `?ParentGroupId=N` pre-populates the Parent Group picker; `?autoEdit=true` opens the Edit panel on initial render. Trailblazer per-field styling (Q6 / Q3.6) is wired on the five enumerated controls (Group Administrator, Required Signature Document, Member Record Source, Show Advanced Relationship Settings InlineSwitch, four relationship multipliers) using the framework's existing `trailblazerField` prop. Sections 5 / 6 / 7 / 9 / 10 render inline `<NotificationBox>` "Coming in Phase 4 / 5" placeholders within the same `editPanel.partial.obs` file (per Q3.1 lock). Section 4 Stack 2 (Locations editing) renders a "Coming in Phase 6" placeholder. The L1 latent bug (duplicate code block in WebForms `ShowGroupTypeEditDetails`) is naturally avoided by the single-emit `BuildGroupTypeOptionsBag` shape.
+
+### Coverage report
+
+The full coverage report appears under "Self-review coverage report" above. Summary: every Implementation checklist item is ✓ implemented with a file:line reference; every Research-coverage behavior is classified ✓ / → / ✗; zero ✗ MISSED rows.
+
+### Deviations from the spec
+
+| # | Deviation | Reason / Mid-phase decision |
+|---|---|---|
+| 1 | `photoBinaryFile` / `chatChannelAvatarBinaryFile` typed as `ListItemBag` (not `Guid?`) | MP-3.1 — framework convention. C# resolves `ListItemBag.Value` Guid to `BinaryFile.Id` server-side. |
+| 2 | `ElevatedSecurityLevel` enum relocated to `Rock.Enums/Security/` (namespace preserved) | MP-3.2 — `Rock.ViewModels` only references `Rock.Enums`; no other path was viable. Namespace `Rock.Utility.Enums` is preserved for plugin binary compat (mirrors the Rock 19.0.6 `FamilyLimits` / `CreateConnectionRequestOptions` move). `[Rock.Enums.EnumDomain( "Security" )]` is fully-qualified to avoid shadowing in sibling Rock.Enums files; two siblings (`CreateConnectionRequestOptions.cs`, `FamilyLimits.cs`) rewrote their `[Enums.EnumDomain(...)]` to `[Rock.Enums.EnumDomain(...)]` for the same reason. `TypeForwardedTo` entry added to `Rock/Properties/AssemblyInfo.cs`. Zero consumer files needed code changes. |
+| 3 | ~~Edit block action returns composite `EditModeResponseBag` (bag + groupTypeOptions)~~ **Superseded** | MP-3.3 (superseded). Replaced by reactive `groupTypeId` watcher in the Vue shell; `Edit` returns standard `ValidPropertiesBox<GroupBag>`. See IR-4. |
+| 4 | Phase 2 framework `titleIconCssClass` prop loosened to `string \| null` | MP-3.4 — Phase 2 carry-forward bug blocking the build. 1-line type-only change matching the existing internal `?? ""` handling. |
+| 5 | ~~`EnableInactiveReason` / `RequiresInactiveReason` fetched from live entity~~ **Superseded** | MP-3.5 (superseded). Both flags added to `GroupTypeCache`; `BuildGroupTypeOptionsBag` is now pure-cache. See IR-1. |
+
+### Files changed
+
+**New files**:
+
+- `Rock.Enums/Security/ElevatedSecurityLevel.cs` (relocated from `Rock/Utility/Enums/`)
+- `Rock.JavaScript.Obsidian/Framework/Enums/Security/elevatedSecurityLevel.ts` (placeholder; codegen will regenerate)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupTypeOptionsBag.cs`
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag.d.ts` (placeholder; codegen will regenerate)
+
+**Modified files**:
+
+- `Rock.Blocks/Group/GroupDetail.cs` (Phase 3 expansion; +~1100 lines)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupBag.cs` (edit-mode scalar fields)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupDetailOptionsBag.cs` (AllowedGroupTypes / SignatureDocumentTemplates / PreventSelectingInactiveCampus / AutoEdit fields)
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupBag.d.ts` (placeholder)
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupDetailOptionsBag.d.ts` (placeholder)
+- `Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts` (titleIconCssClass typing fix)
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs` (Add-mode chrome + edit-mode wiring + onGroupTypeIdChanged + onSave)
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs` (full Phase 3 implementation; was a placeholder)
+
+**Files touched as part of the ElevatedSecurityLevel namespace-preserving relocation**:
+
+- `Rock.Enums/Security/ElevatedSecurityLevel.cs` (NEW; relocated from `Rock/Utility/Enums/ElevatedSecurityLevel.cs`; namespace `Rock.Utility.Enums` preserved; `[Rock.Enums.EnumDomain( "Security" )]` fully qualified).
+- `Rock.Enums/Connection/CreateConnectionRequestOptions.cs` and `Rock.Enums/Connection/FamilyLimits.cs` — `[Enums.EnumDomain( "Connection" )]` rewritten to `[Rock.Enums.EnumDomain( "Connection" )]` (necessary because the new `Rock.Utility.Enums` sub-namespace shadows the unqualified `Enums.` prefix in sibling `namespace Rock.Utility` files).
+- `Rock/Properties/AssemblyInfo.cs` — `[assembly: TypeForwardedTo( typeof( Rock.Utility.Enums.ElevatedSecurityLevel ) )]` added under a "Rock 20.X" comment block.
+
+No consumer files required code changes — the preserved namespace means existing `using Rock.Utility.Enums;` directives and fully-qualified `Rock.Utility.Enums.ElevatedSecurityLevel` references continue to resolve.
+
+### New latent bugs / TODOs surfaced
+
+See "C5 — New latent bugs / TODOs surfaced" above.
+
+### Build status
+
+- Rock.sln C# build: **clean** (zero CS errors).
+- Rock.JavaScript.Obsidian.Blocks TS build: **clean** (zero TS errors).
+- Pre-existing ASPNETCOMPILER warning (`The target directory is not empty`) is unrelated to Phase 3 changes; it's a RockWeb precompile-output artifact issue and does not affect the Rock.dll, Rock.Blocks, or Obsidian framework builds.
+
+### Commit hash
+
+Awaiting user commit; commit hash to be filled in after `git commit` lands.
+
+## Iterative review and refactoring (post-spec-lock)
+
+This section captures the user-driven iterative refactor pass that ran **after** the Phase 3 implementation was code-complete. The pass aligned `groupDetail.obs` and `GroupDetail.cs` more closely with canonical Rock detail-block patterns (`connectionTypeDetail.obs`, `groupTypeDetail.obs`, `stepProgramDetail.obs`, `connectionOpportunityDetail.obs`) and resolved several latent issues. Implementation behavior is unchanged where the spec defined it; the changes are structural / performance / correctness improvements that surface during careful read-through.
+
+The pass is **in progress** — items below mark what's been completed. The "Pending" subsection at the end records work the next session should pick up.
+
+### IR-1. `GroupTypeCache` extended with `EnableInactiveReason` / `RequiresInactiveReason`
+
+Added both flags to `GroupTypeCache` matching the existing `EnableRSVP` / `IsCapacityRequired` `[DataMember] public bool { get; private set; }` pattern + corresponding `SetFromEntity` assignment. `BuildGroupTypeOptionsBag` now reads them off the cache directly. Removes the live `GroupTypeService.Get(...)` per cascade documented in MP-3.5. Resolves C5 TODO #3.
+
+Files: [Rock/Web/Cache/Entities/GroupTypeCache.cs](../../Rock/Web/Cache/Entities/GroupTypeCache.cs), [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs) `BuildGroupTypeOptionsBag`.
+
+### IR-2. `GetLegacyTemplates()` swapped for the modernized `IsActive` pattern
+
+Commit `a3276b7` (Apr 2026) removed every external signature provider (SignNow, `DigitalSignatureComponent`, `DigitalSignatureContainer`, `ProcessSignatureDocuments`, related transactions). Legacy templates still exist as DB rows but `SendLegacyProviderDocument` returns `"Legacy signature providers are no longer supported in Rock."` The WebForms block's `GetLegacyTemplates()` filter (`Where(ProviderEntityTypeId.HasValue)`) was a stale outlier that surfaced only now-dead templates.
+
+Phase 3's `BuildSignatureDocumentTemplateListItems` was rewritten to mirror the post-modernization pattern from `RegistrationTemplateDetail.ascx.cs:2983` (touched by the same commit):
+
+```csharp
+new SignatureDocumentTemplateService( RockContext )
+    .Queryable()
+    .Where( t => t.IsActive || t.Id == currentTemplateId )
+    .OrderBy( t => t.Name )
+    .Select( ... )
+```
+
+The helper now takes the entity so a group bound to a deactivated template still surfaces its current value. The `#pragma warning disable CS0618` was removed. Resolves C5 TODO #4.
+
+Side cleanup: dropped the redundant `AsNoTracking()` from this query — the projection-to-anonymous before `.ToList()` means EF can't track the materialized result anyway.
+
+Files: [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs) `BuildSignatureDocumentTemplateListItems`.
+
+### IR-3. `?autoEdit=true` plumbing removed (framework handles it)
+
+The `<DetailBlock>` framework template at [detailBlock.ts:360, 915-919](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:360) reads `autoEdit` from `URLSearchParams` and auto-fires `onEditClick()` on setup, which invokes the consumer's registered `@edit` handler.
+
+Phase 3's implementation duplicated this server-side (`PageParameterKey.AutoEdit` + `GroupDetailOptionsBag.AutoEdit` + `GetBoxOptions` read) and in `groupDetail.obs`'s setup-tail (manual `if (config.options?.autoEdit) { panelMode.value = Edit; void onEdit(); }`). Worse, the manual Vue block ran in parent setup BEFORE the framework's child-mount auto-trigger — producing a duplicate `Edit` block-action call per `?autoEdit=true` page load.
+
+All redundant plumbing was removed. The framework now handles it end-to-end. Implementation checklist item A3 is marked superseded inline. Resolves a latent duplicate-fetch bug.
+
+Files: `Rock.Blocks/Group/GroupDetail.cs` (constants + `GetBoxOptions`), `Rock.ViewModels/Blocks/Group/GroupDetail/GroupDetailOptionsBag.cs`, `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupDetailOptionsBag.d.ts`, `Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs` (setup-tail).
+
+### IR-4. `EditModeResponseBag` composite eliminated; reactive `groupTypeId` watcher added
+
+The composite C# class ([GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs)) and the matching TypeScript type ([groupDetail.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs)) were both deleted. The `Edit` block action now returns standard `ValidPropertiesBox<GroupBag>` matching every canonical sibling.
+
+Cascade fetching is replaced with a single reactive watcher in the Vue shell:
+
+```typescript
+watch(() => groupEditBag.value.bag?.groupTypeId, async (newId) => {
+    if (!newId || newId <= 0) {
+        groupTypeOptions.value = {} as GroupTypeOptionsBag;
+        return;
+    }
+    const result = await invokeBlockAction<GroupTypeOptionsBag>("GetGroupTypeOptions", { groupTypeId: newId });
+    if (result.isSuccess && result.data) { groupTypeOptions.value = result.data; }
+    else { errorMessage.value = ...; scrollToErrorNotification(); }
+});
+```
+
+Covers all three trigger paths (initial Edit, Add-mode group-type pick, mid-edit swap) in one declaration. The `onGroupTypeIdChanged` shell handler, the `@groupTypeIdChanged` template binding, and the `groupTypeIdChanged` emit declaration in the partial were all removed. Supersedes MP-3.3.
+
+Trade: two round-trips on initial Edit (Edit returns → watcher fires → GetGroupTypeOptions). Latency cost is unobservable in practice (the user clicked Edit and is committed to the wait). Worth the alignment.
+
+### IR-5. Vue shell aligned to canonical detail-block pattern
+
+Multiple structural mismatches with `connectionTypeDetail.obs` / `groupTypeDetail.obs` / `stepProgramDetail.obs` / `connectionOpportunityDetail.obs` were fixed:
+
+- **`isAddMode` shell-level computed dropped.** Inlined `panelMode === DetailPanelMode.Add` at 11 sites (template attributes + computeds + handler). The partial keeps its own local `isAddMode` (computed from `!bag.value.idKey`) as the canonical Add-mode signal.
+- **`groupViewBag` typing simplified.** From strict `ref<GroupBag>(config.entity ?? {} as GroupBag)` to canonical `ref(config.entity)` (infers `Ref<X | null | undefined>`). Matches every canonical sibling.
+- **`groupEditBag` init simplified.** From pre-populated shallow copy with `validProperties: []` to canonical empty `{ bag: {} as GroupBag }`. Setup-tail populates it on Add path; `onEdit` populates it from server on Edit path.
+- **Long explanatory comment block dropped.** No longer applicable after the bag-init simplification.
+- **`panelMode` init reverted to `DetailPanelMode.View`.** Add-mode transition happens in the canonical script-setup-tail block.
+- **Canonical script-setup-tail block added.** Standard 3-branch error / no-entity / Add-mode-with-editBag-init shape matching siblings.
+- **`onCancelEdit` aligned.** Detects Add via `!editBag.value.bag?.idKey`; redirects to `GroupListPage` if configured (was `return false`, leaving the Add-mode user stuck). Behavior fix on top of pattern alignment.
+- **`onSave` aligned.** Wrapped happy path in `if (result.isSuccess && result.data)`; dropped the gratuitous spread + `"bag" in result.data` runtime guard + dead edit-bag re-sync.
+- **`onEdit` aligned.** Now returns canonical `ValidPropertiesBox<GroupBag>`; populates `validProperties` via `result.data.validProperties ?? Object.keys(result.data.bag)` fallback.
+- **`BlockActionName.Save` added** to the enum at `types.partial.ts`; replaces the magic-string `"Save"` literal.
+
+Files: [Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs), [Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/types.partial.ts](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/types.partial.ts).
+
+### IR-6. `panelMode` prop dropped from edit partial
+
+The `editPanel.partial.obs` previously received `:panelMode` from the shell solely to compute `isAddMode`. None of the canonical sibling edit partials accept a `panelMode` prop — they derive Add mode from `bag.idKey`. Refactored:
+
+- Removed the `panelMode` prop from `defineProps`.
+- Removed the `DetailPanelMode` import (no longer used).
+- Replaced `isAddMode = computed(() => props.panelMode === DetailPanelMode.Add)` with `isAddMode = computed(() => !bag.value.idKey)` — canonical signal.
+- Dropped `:panelMode="panelMode"` template binding from the shell's `<EditPanel>` element.
+
+Files: [Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs), [Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs).
+
+### IR-7. `useEntityDetailBlock` hook adopted
+
+Phase 3 was missing the canonical `useEntityDetailBlock({ blockConfig: config, entity: editBag })` hook adopted by every sibling. The hook does three load-bearing things our shell wasn't doing:
+
+1. **`provideSecurityGrant(securityGrant)`** — many Rock framework controls (`<PersonPicker>`, `<GroupPicker>`, `<CampusPicker>`, `<DefinedValuePicker>`, `<ImageUploader>`, `<auditDetail>`, badge / file pickers) call `useSecurityGrantToken()` and rely on this inject for authenticated server requests. Without it those controls fell back to no token.
+2. **`provideEntityTypeGuid` / `provideEntityTypeName`** via inject — replaces explicit template props.
+3. **Returns `onPropertyChanged`** — handles auto-refresh of attribute values when qualified attribute properties change. Forward-compat for Phase 4 attributes.
+
+Adoption changes:
+
+- Added `useEntityDetailBlock` to the `@Obsidian/Utility/block` import.
+- `const baseBlock = useEntityDetailBlock({ blockConfig: config, entity: groupEditBag });` after the editBag declaration.
+- `@propertyChanged="baseBlock.onPropertyChanged"` wired on `<EditPanel>`.
+- Partial: added `(e: "propertyChanged", value: string)` to `defineEmits`; `pushBagUpdate` now also emits `propertyChanged` after each field change (alongside `update:modelValue`).
+- Removed `entityTypeGuid` / `entityTypeName` shell-level computeds and the matching template props (the inject covers it).
+
+Files: [Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs), [Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs).
+
+### IR-8. `scrollToErrorNotification()` added (matches `connectionTypeDetail`)
+
+Added an `errorMessageElement` ref bound to the error `<NotificationBox>` and a `scrollToErrorNotification()` function that smoothly scrolls it into view via `nextTick + scrollIntoView`. Wired into all six server-error paths in the shell (`onEdit`, `onSave`, `onDelete`, `onArchiveClick`, `onCopySave`, watcher-failure). Matches the canonical `connectionTypeDetail` pattern.
+
+Files: [Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs).
+
+### IR-9. Other Vue cleanup
+
+- **`blockError` init simplified.** From `ref(config.errorMessage ?? "")` to canonical `ref("")`; the setup-tail handles the `config.errorMessage` case.
+- **`:showExperienceMode="true"` added** on `<DetailBlock>` to match the canonical visual.
+- **Added xml-doc to `openCopyModal()`** for consistency with neighboring helper methods.
+
+### IR-10. `ApplyNewGroupDefaultValues` helper extracted (parent-group pre-pop)
+
+The `Edit` block action previously contained an inline 4-deep nested block to pre-populate `entity.ParentGroupId` from `?ParentGroupId=N` on the Add path, including a dead `if (parentGroup.GroupTypeId > 0) { /* comment */ }` branch whose only purpose was to host an explanatory comment.
+
+Refactored to mirror `ConnectionTypeDetail.ApplyNewConnectionTypeDefaultValues`:
+
+- New private helper `ApplyNewGroupDefaultValues(Model.Group entity, GroupService groupService = null)` in `#region Methods`. Three early-return guards (null/already-has-id, empty page param, parent group not found), then assignment. Linear flow.
+- Helper hooked into `GetInitialEntity()` (after `GetInitialEntity<Model.Group, GroupService>` resolves).
+- Helper hooked into `TryGetEntityForEditAction()`'s new-entity branch right after `entityService.Add( entity )`.
+- `Edit` block action body shrunk to four lines of structural code.
+
+Side effect: defaults now apply consistently from **both** entry points. Previously only `Edit` (which calls `TryGetEntityForEditAction`) ran the pre-populate; non-Edit consumers of `GetInitialEntity` (breadcrumb, options bag construction, `GetGroupTypeOptions` auth re-check) missed it.
+
+Files: [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs).
+
+### IR-11. `GetEffectiveGroupType` deleted; `_cachedGroupType` per-request memo on `GetGroupTypeCache`
+
+`GetEffectiveGroupType(entity, bag)` was a defensive helper that preferred `bag.GroupTypeId` and fell back to `entity.GroupTypeId`. The defensive logic was unnecessary: `entity.GroupTypeId = box.Bag.GroupTypeId.Value` is assigned in `UpdateEntityFromBox` (line 676 region) **before** every dependent `IfValidProperty` call site. Reading `entity.GroupTypeId` directly produces the same result in every realistic scenario, plus the existing `GetGroupTypeCache(entity)` helper already handled the null/zero-Id guards.
+
+Two-stage refactor:
+
+1. **Consolidation (first pass):** dropped `GetEffectiveGroupType` and replaced its 6 in-`UpdateEntityFromBox` call sites with a single captured local `var groupType = GetGroupTypeCache(entity);` declared **after** the GroupTypeId IfValidProperty block. Each subsequent dependent lambda closes over this local. `ApplyChatChannelAvatarBinaryFile` was updated to call `GetGroupTypeCache(entity)` directly. Reduced 6 lookups → 1 per Save invocation of `UpdateEntityFromBox`.
+
+2. **Per-request memoization (second pass):** added `private GroupTypeCache _cachedGroupType` instance field under a new `#region Fields`. Converted `GetGroupTypeCache` from `static` to instance method with self-invalidating key check:
+
+   ```csharp
+   private GroupTypeCache GetGroupTypeCache( Model.Group entity )
+   {
+       if ( entity == null || entity.GroupTypeId <= 0 ) { return null; }
+       if ( _cachedGroupType?.Id == entity.GroupTypeId ) { return _cachedGroupType; }
+       _cachedGroupType = GroupTypeCache.Get( entity.GroupTypeId );
+       return _cachedGroupType;
+   }
+   ```
+
+   The key check `_cachedGroupType?.Id == entity.GroupTypeId` handles mid-request reassignment: if `entity.GroupTypeId` changes from N to M, the next call sees the mismatch and re-resolves. `GetGroupTypeOptions(int groupTypeId)` block action keeps its direct `GroupTypeCache.Get(groupTypeId)` call since it operates on an arbitrary id that may not match the entity's current type. Pattern matches the "lazy-resolve once via a property" Rock convention used elsewhere (e.g., `GetBlockPersonPreferences`).
+
+Net effect across a single Save request: was ~7+ scattered cache lookups → now 1 cache lookup, subsequent calls hit the memo as a single Id comparison.
+
+Files: [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs).
+
+### IR-12. Parity audit fixes (Add-mode dependent fields, GroupType auto-pick)
+
+A line-by-line C# parity audit against the WebForms `btnSave_Click` / `ShowEditDetails` / `ShowDetail` surfaced one critical bug and two notable parity gaps. All three resolved.
+
+**C-1 (critical) — Add path silently dropped every GroupType-dependent field on Save.** `UpdateEntityFromBox` captured `var groupType = GetGroupTypeCache(entity)` *before* the GroupTypeId IfValidProperty block. For a fresh Add-mode entity, `entity.GroupTypeId == 0` at capture time, so `GetGroupTypeCache` returned null (per its `GroupTypeId <= 0` guard). The dependent lambdas at admin / record source / peer network / RSVP / chat all closed over that captured-null local — so on a new group the user's picks for those fields were discarded (or worse, force-nulled by the `else` branches).
+
+IR-11's spec text correctly said "declared **after** the GroupTypeId IfValidProperty block" but the implementation had it before. Fixed by moving the `var groupType = GetGroupTypeCache( entity );` declaration to immediately after the GroupTypeId IfValidProperty closes. Edit-path behavior is unchanged (existing groups' GroupTypeId is read-only in the UI).
+
+**N-1 — `?ParentGroupId=N` Add path didn't auto-pick a single allowed group type.** WebForms `ShowDetail` ([line 1782](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:1782)) walks the parent's allowed child group types, filters by per-group-type EDIT auth, and pre-selects when exactly one survives. `ApplyNewGroupDefaultValues` previously only set `ParentGroupId`. Resolved by adding the auth-probe loop + single-survivor pre-select.
+
+**N-2 — `LimittoSecurityRoleGroups=true` Add path didn't default GroupType to Security Role.** WebForms forces `CurrentGroupTypeId = securityRoleGroupType.Id` ([line 2030](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2030)). Resolved by adding the security-role default branch (which short-circuits the parent-driven auto-pick since the dropdown is already constrained to one option).
+
+**M-3 verified parity (no fix needed).** Both `Archive` (single-group) and `ArchiveWithChildren` correctly mirror the WebForms `ArchiveSingleGroup` / `ArchiveAllChildGroups` shape, including the `includeInactiveChildGroups: true` flag on the descendant lookup ([WebForms line 3426](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:3426)).
+
+Files: [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs) (`UpdateEntityFromBox` groupType capture relocated; `ApplyNewGroupDefaultValues` extended with security-role default + parent-driven auto-pick).
+
+### IR-13. Second-pass audit (redundancies, parity gaps, performance)
+
+A second full-file C# audit was run after IR-12 to confirm readiness for Phase 4. Findings split into redundancies (R), parity gaps (G), and performance (P). Code-level fixes and engineering notes applied this pass; deferred items captured in the Pending subsection below.
+
+**R-1 — `ApplyInlineSchedule` return value never consumed.** The helper returned the post-validation `ScheduleType` after gate-3 / gate-4 demotion, but no caller read the return. Likely an extraction artifact. Signature changed to `void`; the unused `var scheduleType =` capture at the call site dropped.
+
+**R-2 — Save gate 5 re-fetched ParentGroup unnecessarily.** When `ApplyNewGroupDefaultValues` had already pre-populated `entity.ParentGroup` (Add-from-tree path), the gate-5 query was redundant. Changed to `entity.ParentGroup ?? new GroupService(RockContext).Get(...)` fallback. Saves one query per Save when the navigation is loaded.
+
+**G-2 — Save isNew redirect didn't preserve `?ExpandedIds=...`.** WebForms `btnSave_Click` ([line 1447](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:1447)) preserves it for tree-navigation context. The Phase 3 Save action only echoed `GroupId`. The `Copy` block action correctly preserves it ([line 1402](../../Rock.Blocks/Group/GroupDetail.cs:1402)) — Save now matches that pattern.
+
+**G-3 — `bag.HasChildGroups` semantic mismatch with the Inactivate-children prompt.** The Vue uses the single field for both the Archive cascade prompt (immediate-children-any-state, matches WebForms 641) and the Inactivate-cascade checkbox visibility (which WebForms gates on `HasDescendantGroups(id, includeInactive: false)` at [line 1989](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:1989)). The Inactivate prompt may render in the narrow case of inactive-only direct descendants — toggling is a harmless no-op (the cascade `GetAllDescendentGroupIds(includeInactive: false)` correctly skips), just slightly confusing UX. Splitting into two bag fields is the right long-term shape; deferred to Phase 5 (in the cascade neighborhood). Engineering note added at the field assignment.
+
+**Performance notes added (no code changes):**
+
+- **P-2** — `GetCommonEntityBag` lazy-load pattern (Schedule / Admin-Person / ParentGroup / Photo). 5-6 round-trips per page-load read. Matches WebForms `GetGroup` at [GroupDetail.ascx.cs:2913](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:2913). Eager-Include override deferred until Phase 5/6 work is in this neighborhood.
+- **P-3** — Two-EXISTS hasHistory check at [GetBoxOptions](../../Rock.Blocks/Group/GroupDetail.cs:425). Mirrors WebForms 2582-2583. The `EnableGroupHistory` short-circuit prevents the queries from running on most groups; combining via UNION isn't simpler in EF.
+- **P-4** — `GetAllowedGroupTypes` invoked from three call sites within a request (BuildAllowedGroupTypeListItems / Save gate 5 / ApplyNewGroupDefaultValues' auth probe). Per-request memoization keyed by `parentGroupGroupType?.Id` is the natural optimization if profiling surfaces it.
+
+**Verification of deferred returnUrl handling.** The audit noted that Save / Cancel didn't honor `?returnUrl=...` server-side. Cross-checking IR-3's claim, the `<DetailBlock>` framework template at [detailBlock.ts](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts) handles `?returnUrl=` end-to-end after Save and on Cancel. Server-side handling for these paths is therefore unnecessary — captured as G-1 / G-4 in the audit and tracked in Pending below for one final detailBlock.ts read-through to confirm. ExpandedIds (G-2 above) is application-specific and the framework cannot handle it; that's why a server-side fix was required.
+
+Files: [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs) (R-1 + R-2 + G-2 code fixes; G-3 / P-2 / P-3 / P-4 engineering notes added).
+
+### IR-14. Picker-shaped `ListItemBag` payload (one field per concept)
+
+The Phase 3 lock shipped picker fields as paired scalars on `GroupBag` (e.g., `ParentGroupId: int?` + `ParentGroupName: string`, `GroupAdministratorPersonAliasGuid: Guid?` plus a separate view-mode `Administrator: GroupAdministratorBag`). The Vue layer reassembled these into `ListItemBag`s client-side via init ternaries, mirrored the assembly in the inbound watcher, and split-wrote each scalar back in the outbound watcher. Six picker fields x three sites = ~30 lines of mechanical scaffolding. The view-mode rich bags (`Administrator`, `ParentGroup`) lived as separate properties because they carried `Url` (server-resolved, customer-customizable via `EntityType.LinkUrlLavaTemplate`) which `ListItemBag` doesn't have — the picker can't bind to a bag that has no `Value`/`Text`.
+
+Resolved by collapsing each concept to a single bag field:
+
+- **`GroupAdministratorBag` and `ParentGroupBag` now inherit from `ListItemBag`.** They keep the `Url` field for view-mode link rendering, and acquire `Value`/`Text` from the base. `Name` was renamed to `Text` (the inherited member) — view panel binds `bag.administrator.text` instead of `bag.administrator.name`. The picker can bind to the same field because the bag IS a `ListItemBag`.
+- **`GroupBag` lost 7 paired-scalar fields** (`ParentGroupId`, `ParentGroupName`, `CampusId`, `GroupAdministratorPersonAliasGuid`, `GroupMemberRecordSourceValueId`, `NamedScheduleId`, `ScheduleCoordinatorPersonAliasGuid`) and gained 4 new `ListItemBag` properties (`Campus`, `GroupMemberRecordSource`, `NamedSchedule`, `ScheduleCoordinatorPerson`). The existing `Administrator` and `ParentGroup` rich bags now serve both view AND edit (the picker reads `Value`/`Text`; `Url` is harmlessly null after a fresh edit-mode pick and re-populates on the next view-mode load).
+- **`BuildAdministratorRef` / `BuildParentGroupRef` updated** to populate inherited `Value` (PersonAlias Guid / parent group Id-as-string) and `Text` alongside `Url`. `BuildAdministratorRef` now takes `PersonAlias` directly (not `Person + GroupTypeCache + ?.Person` chain) so the alias Guid is available without a redundant nav.
+- **Three new helpers added** in the build-helpers neighborhood: `BuildCampusListItem(int? campusId)` (CampusCache lookup), `BuildDefinedValueListItem(int? definedValueId)` (DefinedValueCache lookup), `BuildPersonAliasListItem(PersonAlias personAlias)`. Each returns null on miss. Inline construction in `HydrateScheduleFields` for `NamedSchedule` (Schedule navigation already loaded).
+- **Save sites simplified.** `entity.ParentGroupId = box.Bag.ParentGroup?.Value.AsIntegerOrNull()` and analogous for Campus / GroupMemberRecordSource; `entity.GroupAdministratorPersonAliasId` and `entity.ScheduleCoordinatorPersonAliasId` resolve via `aliasGuid = box.Bag.Administrator?.Value.AsGuidOrNull()` then PersonAliasService lookup. Inline-schedule save reads `bag.NamedSchedule?.Value.AsIntegerOrNull()`.
+- **`editPanel.partial.obs` collapsed.** 6 paired-ref ternary inits → 6 `propertyRef<ListItemBag | null>` declarations folded into the flat `propRefs` array. 6 inbound `updateRefValue` ternaries → 6 single-line `updateRefValue(ref, props.modelValue.bag?.field ?? null)` calls. Outbound watcher source list dropped the 6 explicit ListItemBag refs (now covered by `...propRefs`); the 8 split-write `setPropertiesBoxValue` sites collapsed to 6 single-line writes (no more `parseInt` / `toGuidOrNull` plumbing). Dropped the now-unused `toGuidOrNull` import.
+- **`viewPanel.partial.obs` updated.** 4 references to `.administrator.name` / `.parentGroup.name` swapped to `.text` (the inherited ListItemBag field). Existing `.url` reads unchanged.
+
+Net change: ~30 lines of edit-panel scaffolding deleted, 7 bag fields removed, 4 added (net -3), edit-panel `propRefs` array grew from 38 to 44 entries (every picker field is now a normal propertyRef), and one canonical pattern replaced two for picker fields throughout.
+
+**IR-14 follow-up — picker payload Id-vs-Guid bug** (fixed in the same pass before commit). A user-driven audit through every picker control in the edit panel surfaced that the Phase-3 picker payload was using **Id-as-string** for `ParentGroup`, `Campus`, `GroupMemberRecordSource`, and `NamedSchedule`, but the actual picker controls (`<GroupPicker>`, `<CampusPicker>`, `<DefinedValuePicker>`, `<SchedulePicker>`) all consume **Guid-as-string** via their tree providers / cache lookups (canonical pattern is `IEntity.ToListItemBag()` which sets `Value = entity.Guid.ToString()`, mirrored by [LearningClassDetail.cs:296](../../Rock.Blocks/Lms/LearningClassDetail.cs:296) and [StreakTypeDetail.cs:333-475](../../Rock.Blocks/Engagement/StreakTypeDetail.cs:333)). The existing Phase-3 implementation was effectively broken end-to-end: initial load showed an empty picker (the picker couldn't match an Id-as-string against its Guid-keyed items), and picking a new value saved as `null` because `parseInt(guidString)` returns `NaN`. The bug was masked because this code hadn't been live-tested yet.
+
+Resolved by:
+
+- **Build helpers switched to Guid via the canonical `.ToListItemBag()` extension where applicable.** `BuildCampusListItem` and `BuildDefinedValueListItem` collapsed to single-line cache-lookup-then-`?.ToListItemBag()`. `HydrateScheduleFields` for `NamedSchedule` swapped to `entity.Schedule.ToListItemBag()`. `BuildParentGroupRef` continues to construct `ParentGroupBag` explicitly (because of the extra `Url` field on the inheriting bag) but with `Value = parentGroup.Guid.ToString()`.
+- **Save sites switched to `GetEntityId<TEntity>(RockContext)` extension** ([IEntityExtensions.cs:29](../../Rock.Blocks/ExtensionMethods/IEntityExtensions.cs:29)) which parses `Value.AsGuidOrNull()` and resolves Guid → Id via reflection. Applied at four sites: ParentGroup / Campus / GroupMemberRecordSource in `UpdateEntityFromBox`, and NamedSchedule in `ApplyInlineSchedule`.
+- **Administrator and ScheduleCoordinatorPerson save sites unchanged** — they already correctly use `Value.AsGuidOrNull()` + `PersonAliasService.GetSelect(guid, pa => pa.Id)` because PersonPicker emits PersonAlias Guid (per the user's earlier memory entry).
+
+**IR-14 follow-up — PersonPicker type errors** (also fixed in this pass). After the canonical-pattern alignment, `<PersonPicker>` exposed two type errors that lint surfaced: its modelValue prop is `ListItemBag` (effectively `| undefined` since `required: false`) and its emit signature is `ListItemBag | undefined`, but the two PersonPicker propertyRefs were typed `ListItemBag | null` after the refactor — passing `null` violates the prop type and receiving `undefined` violates the ref type. All other pickers (Group / Campus / Schedule / DefinedValue) accept `ListItemBag | ListItemBag[] | null` so `| null` is correct for them. Resolved by narrowing `groupAdministrator` and `scheduleCoordinatorPerson` to `propertyRef<ListItemBag | undefined>` and switching their `?? null` defaults to `?? undefined` in init and inbound watcher.
+
+**Other picker controls audited and confirmed correct:**
+
+- The four `<DropDownList>` controls (`inactiveReasonValueId`, `groupTypeId`, `statusValueId`, `requiredSignatureDocumentTemplateId`) bind Id-as-string scalars, but their server-provided item lists ALSO emit `Value = Id.ToString()` ([GroupDetail.cs:2119](../../Rock.Blocks/Group/GroupDetail.cs:2119), [2144](../../Rock.Blocks/Group/GroupDetail.cs:2144), [2303](../../Rock.Blocks/Group/GroupDetail.cs:2303), [2317](../../Rock.Blocks/Group/GroupDetail.cs:2317)). End-to-end Id-consistent — not a picker mismatch.
+- `<ImageUploader>` controls bind to `BinaryFile.Guid` via `BuildBinaryFileRef` — already correct.
+- `<RadioButtonList>` / `<CheckBoxList>` controls use enum-int-as-string or stringified bitmask flags, with item lists built from `*Description` enum metadata — all internally consistent.
+
+Verification: Rock.Blocks build clean (0 errors), Obsidian Blocks `eslint --max-warnings=0` and `vue-tsc --noEmit` both clean (exit 0).
+
+Files: [Rock.ViewModels/Blocks/Group/GroupDetail/GroupBag.cs](../../Rock.ViewModels/Blocks/Group/GroupDetail/GroupBag.cs), [Rock.ViewModels/Blocks/Group/GroupDetail/GroupAdministratorBag.cs](../../Rock.ViewModels/Blocks/Group/GroupDetail/GroupAdministratorBag.cs), [Rock.ViewModels/Blocks/Group/GroupDetail/ParentGroupBag.cs](../../Rock.ViewModels/Blocks/Group/GroupDetail/ParentGroupBag.cs), [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs), [Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupBag.d.ts](../../Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupBag.d.ts) (placeholder), [groupAdministratorBag.d.ts](../../Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupAdministratorBag.d.ts) (placeholder), [parentGroupBag.d.ts](../../Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/parentGroupBag.d.ts) (placeholder), [Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs), [viewPanel.partial.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/viewPanel.partial.obs).
+
+### IR-15. `?returnUrl=` parity gap closed (Save + Cancel)
+
+A direct read-through of [detailBlock.ts](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts) (the `<DetailBlock>` framework template) revealed that IR-3's assumption — "framework handles `?returnUrl=` end-to-end after Save and on Cancel" — was correct only for the autoEdit-bound flow. Both the Save handler at [detailBlock.ts:736-744](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:736) and the Cancel handler at [detailBlock.ts:630-638](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:630) gate the `returnUrl` redirect on `isAutoEditMode.value`, which is set only when `?autoEdit=true` is also present at page load ([detailBlock.ts:360](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:360)).
+
+WebForms parity ([GroupDetail.ascx.cs:1438-1441](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:1438) for Save, [GroupDetail.ascx.cs:1460-1463](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:1460) for Cancel) honors `?returnUrl=` **unconditionally** — no autoEdit gate. So `?returnUrl=` without `?autoEdit=true` was being silently ignored on the Obsidian side: the user landed on the page, clicked Edit, then Save / Cancel returned to view mode instead of redirecting back to the original caller.
+
+Resolved with two small additions mirroring the existing `NavigateAfterDeleteOrArchive` pattern (which already covered Delete / Archive returnUrl correctly):
+
+- **Save action (server-side):** new returnUrl branch at the top of the Save action's success path, after the IsSecurityRole cache invalidation and before the existing `isNew` redirect block. If `PageParameter(PageParameterKey.ReturnUrl)` is set and `IsSafeReturnUrl(...)` passes, returns `ActionContent(HttpStatusCode.OK, returnUrl)` — the framework's `onSave` handler treats string results as redirect URLs and applies `makeUrlRedirectSafe` ([detailBlock.ts:747-748](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:747)). Wins over the `isNew` ExpandedIds redirect when both are set, matching WebForms precedence. The stale comment at the former line 1329-1331 ("returnUrl is honored by the `<DetailBlock>` framework template ... so it isn't echoed here") was removed.
+- **Cancel handler (client-side):** new returnUrl branch at the top of `onCancelEdit` in [groupDetail.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs). If `new URLSearchParams(window.location.search).get("returnUrl")` is non-null, returns it as a string — the framework's `onEditCancelClick` handler treats string results as redirect URLs ([detailBlock.ts:641-642](../../Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts:641)). Wins over the existing Add-mode `GroupListPage` fallback, matching WebForms precedence at [GroupDetail.ascx.cs:1460](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:1460). Client-side URL safety is enforced by the framework's `makeUrlRedirectSafe` wrapper.
+
+Both flows now have full WebForms parity for the four `?returnUrl=` permutations:
+
+| Flow | autoEdit + returnUrl | returnUrl alone |
+|---|---|---|
+| Save | framework redirects ✓ | server action returns redirect string ✓ |
+| Cancel | framework redirects ✓ | client handler returns redirect string ✓ |
+| Delete / Archive | server `NavigateAfterDeleteOrArchive` ✓ | same ✓ |
+
+Verification: Rock.Blocks build clean (0 errors), Obsidian Blocks `eslint --max-warnings=0` and `vue-tsc --noEmit` both clean (exit 0).
+
+Files: [Rock.Blocks/Group/GroupDetail.cs](../../Rock.Blocks/Group/GroupDetail.cs) (new returnUrl branch in Save action; stale comment removed), [Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs](../../Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs) (new returnUrl branch in `onCancelEdit`).
+
+### Pending (next session)
+
+- **Commit.** All post-spec-lock work (IR-1 through IR-15) remains uncommitted in the working tree per "User owns commits at phase boundaries" — the user runs `git commit` themselves. Suggested release-note classification: `+ (Group)` Improvement, since this is the first Obsidian conversion of GroupDetail spanning Phases 1-3.
+
+### Resolved this session
+
+- **Build verification.** Resolved 2026-05-09 — `dotnet build Rock.Blocks` and `dotnet build Rock.ViewModels` both clean (0 errors); `npx eslint` and `npx vue-tsc --noEmit` both clean. Full Rock.sln Framework-MSBuild build still recommended before commit but the Phase 3 surface is verified.
+- **G-1 / G-4 returnUrl confirmation.** Resolved 2026-05-09 via IR-15 above — verified the framework gates returnUrl on autoEdit, identified the parity gap with WebForms, closed it server-side (Save) + client-side (Cancel).
+
+### Updated files list (post-refactor)
+
+Cumulative list of every file touched during Phase 3 (spec-lock implementation + iterative review). Newly-touched files in this iterative pass are marked **\[IR\]**.
+
+**New files:**
+
+- `Rock.Enums/Security/ElevatedSecurityLevel.cs` (relocated from `Rock/Utility/Enums/`)
+- `Rock.JavaScript.Obsidian/Framework/Enums/Security/elevatedSecurityLevel.ts` (placeholder; codegen will regenerate)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupTypeOptionsBag.cs`
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag.d.ts` (placeholder; codegen will regenerate)
+
+**Modified files:**
+
+- `Rock.Blocks/Group/GroupDetail.cs` — Phase 3 scalar persistence + iterative refactors **\[IR\]** (`ApplyNewGroupDefaultValues` extraction, `GetGroupTypeCache` memo, `GetEffectiveGroupType` deletion, `EditModeResponseBag` deletion, `BuildSignatureDocumentTemplateListItems` modernization, `?autoEdit` plumbing removed, signature document modernization).
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupBag.cs` **\[IR-14\]** (7 paired scalars dropped, 4 ListItemBag fields added)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupAdministratorBag.cs` **\[IR-14\]** (now inherits ListItemBag; Name renamed to Text)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/ParentGroupBag.cs` **\[IR-14\]** (now inherits ListItemBag; Name renamed to Text)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupDetailOptionsBag.cs` **\[IR\]** (AutoEdit field removed)
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupBag.d.ts` (placeholder)
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupAdministratorBag.d.ts` **\[IR-14\]** (placeholder)
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/parentGroupBag.d.ts` **\[IR-14\]** (placeholder)
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupDetailOptionsBag.d.ts` **\[IR\]** (autoEdit field removed)
+- `Rock.JavaScript.Obsidian/Framework/Templates/detailBlock.ts` (titleIconCssClass typing fix)
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/groupDetail.obs` **\[IR\]** (canonical alignment, `useEntityDetailBlock` adoption, reactive watcher, scroll-to-error)
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs` **\[IR\]** (panelMode prop dropped, propertyChanged emit added, groupTypeIdChanged emit removed); **\[IR-14\]** (6 paired refs collapsed to propertyRefs, watcher scaffolding removed, toGuidOrNull import dropped)
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/viewPanel.partial.obs` **\[IR-14\]** (administrator/parentGroup name reads switched to text)
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/types.partial.ts` **\[IR\]** (`BlockActionName.Save` enum value added)
+- `Rock/Web/Cache/Entities/GroupTypeCache.cs` **\[IR\]** (`EnableInactiveReason` + `RequiresInactiveReason` properties added)
+
+**Files touched as part of the ElevatedSecurityLevel namespace-preserving relocation** (unchanged from original list):
+
+- `Rock.Enums/Security/ElevatedSecurityLevel.cs` (NEW)
+- `Rock.Enums/Connection/CreateConnectionRequestOptions.cs`, `Rock.Enums/Connection/FamilyLimits.cs`
+- `Rock/Properties/AssemblyInfo.cs`
