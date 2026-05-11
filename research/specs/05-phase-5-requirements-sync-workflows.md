@@ -35,7 +35,7 @@ Architectural decisions for this phase are governed by [00-architecture.md](00-a
   - **L4** ([webforms/13-member-workflow-triggers.md "Latent bugs"](../webforms/13-member-workflow-triggers.md)): the WebForms `FormatTriggerType` body interpolates user-controlled values (workflow role name, status name) into an HTML string without encoding. Phase 5 ports the formatting logic to a Vue template (Vue auto-escapes) or, if server-side, HTML-encodes via `System.Web.HttpUtility.HtmlEncode` (with the System.Web import wrapped in `#if WEBFORMS` per CLAUDE.md — but since the conversion drops System.Web for Obsidian blocks, prefer the Vue-template approach).
 - **Phase 4 carry-forward (latent findings from Phase 4 self-review)**:
   - **L4-carry-1**: ADMINISTRATE / `AllowSpecificGroupMemberAttributes` panel-visibility gate on Section 6. Add `CanAdministrate` to GroupBag (or surface `IsSection6Visible` on the options bag); wrap the Section 6 `<ContentSection>` in `v-if`. One-line additions per side; piggybacks on the Section 7 ADMINISTRATE flag work.
-  - **L4-carry-2**: Add-path GroupType cascade refresh of `bag.attributes`. Extend the reactive `groupTypeId` watcher in `groupDetail.obs` to also re-fetch `bag.attributes` (and `attributeValues`) on cascade. Alternatively: invalidate Section 5 entirely until Save / Re-edit. Decide during Phase 5 spec lock.
+  - ~~**L4-carry-2**: Add-path GroupType cascade refresh of `bag.attributes`.~~ **RESOLVED in Phase 4 post-commit audit pass (2026-05-11).** The canonical `RefreshAttributes` block action inherited from `RockEntityDetailBlockType` already handles this. Phase 4 wired `box.QualifiedAttributeProperties = AttributeCache.GetAttributeQualifiedColumns<Model.Group>()` in `GetObsidianBlockInitialization`. The existing `useEntityDetailBlock` + `@propertyChanged="baseBlock.onPropertyChanged"` chain in `groupDetail.obs` now fires `RefreshAttributes` on any GroupTypeId change, server-side `LoadAttributes` + `GetEntityBagForEdit` returns the new attribute defs + values, and `block.ts:refreshEntityDetailAttributes` merges them into the edit bag. Preserves user-typed values for unchanged Attribute Guids (a free win over my prior manual-watcher approach). Same QAP wiring applied to `GroupTypeDetail.cs` for parity.
 
 ## Behavior NOT delivered
 
@@ -58,7 +58,6 @@ Walks Phase 1, Phase 2, Phase 3, and Phase 4 coverage reports for `→ DEFERRED 
 | Phase 3 | L3 (hard-coded EntityTypeId=15) fix-during | Phase 3 "Behavior NOT delivered" | R5 |
 | Phase 3 | L4 (XSS hole in FormatTriggerType) fix-during | Phase 3 "Behavior NOT delivered" | W5 |
 | Phase 4 | ADMINISTRATE / `AllowSpecificGroupMemberAttributes` panel-visibility gate on Section 6 | Phase 4 C5 finding #1 | Misc-1 |
-| Phase 4 | Add-path GroupType cascade refresh of `bag.attributes` | Phase 4 C5 finding #2 | Misc-2 |
 
 ### Re-deferred to a later phase
 
@@ -72,44 +71,35 @@ None planned at draft time.
 
 Each has a default recommendation; user confirms or overrides during the spec lock pass.
 
-### Q5.1. Reorder column on the Member Workflow Triggers grid
+### Q5.1. Reorder column on the Member Workflow Triggers grid — **LOCKED: preserve WebForms parity**
 
-**Background.** WebForms `gMemberWorkflowTriggers.GridReorder` supports drag-to-reorder. The design (Figma frame [research/design/screenshots/edit-section-10.png](../design/screenshots/edit-section-10.png)) shows NO reorder handle in the captured grid.
+Section 10's editable Grid keeps the ReorderColumn. Trigger evaluation order is meaningful behavior, and the absent reorder handle in the Figma capture is treated as a default-state omission rather than a design choice to drop the feature.
 
-**Default recommendation:** preserve the WebForms parity (add Reorder column). The design's screenshot may be a default-state capture; the underlying behavior is meaningful (trigger order affects evaluation sequence). Confirm with the user.
+### Q5.2. Sync Frequency restyle mechanism — **LOCKED: `variant: "segmented" | "default"` prop**
 
-### Q5.2. Sync Frequency restyle mechanism
+Add a `variant: "segmented" | "default"` prop to `<IntervalPicker>` (default `"default"`). The new layout renders the unit toggle (Mins / Hours / Days) above the slider when `variant="segmented"`. Existing consumers across Rock opt-in by passing the prop; default behavior is unchanged. Naming generalizes if a third layout is ever added (matches the `displayAs*` prop family on `attributeValuesContainer.obs`).
 
-**Background.** Q9 in 00-architecture.md confirmed reusing the existing `<IntervalPicker>` with a scoped styling tweak. The styling change must NOT affect other `<IntervalPicker>` consumers across Rock.
+### Q5.3. Phase 4 carry-forward — Section 6 ADMINISTRATE gate placement — **LOCKED: `CanAdministrate: bool` on `GroupBag`**
 
-**Default recommendation:** add a `variant: "segmented" | "default"` prop on `<IntervalPicker>` that drives the new layout. Document the prop on the component; existing consumers opt-in. Alternative: a `verticalLayout: boolean` prop with a clearer name. Decide during spec lock.
+Add a single `CanAdministrate: bool` to `GroupBag` (mirrors the existing `CanEdit` pattern). Populated in `GetCommonEntityBag` from `entity.IsAuthorized(Authorization.ADMINISTRATE, ...)`. Sections 6 / 7 / 9 read this flag and AND it with the relevant GroupType-level flag from `GroupTypeOptionsBag` in their `v-if` (e.g., `v-if="canAdministrate && groupTypeOptions.allowGroupSync"`). Keeps the per-user-per-entity authorization fact orthogonal to per-GroupType layout decisions.
 
-### Q5.3. Phase 4 carry-forward — Section 6 ADMINISTRATE gate placement
+### ~~Q5.4. Phase 4 carry-forward — Add-path cascade refresh of `bag.attributes`~~ — **RESOLVED**
 
-**Background.** Two possible bag locations for the ADMINISTRATE flag the Vue side needs:
+Resolved during the Phase 4 post-commit audit pass (2026-05-11). The fix uses the canonical `RefreshAttributes` block action inherited from `RockEntityDetailBlockType`: a single line in `GetObsidianBlockInitialization` populates `box.QualifiedAttributeProperties = AttributeCache.GetAttributeQualifiedColumns<Model.Group>()`. The existing client wiring (`useEntityDetailBlock` + `@propertyChanged="baseBlock.onPropertyChanged"`) then fires `RefreshAttributes` automatically on every `GroupTypeId` change for both Add and Edit paths, with the framework merging the new attribute defs + values into the edit bag and preserving user-typed values for unchanged Attribute Guids. The same QAP wiring was added to `GroupTypeDetail.cs` for parity. No Phase 5 work needed.
 
-- (a) Add `CanAdministrate: boolean` to `GroupBag` (mirrors `CanEdit` / `CanAdministrate` patterns elsewhere). Reusable across multiple panels.
-- (b) Add `IsMemberAttributesVisible` / `IsRequirementsVisible` / `IsSyncVisible` / `IsTriggersVisible` to `GroupTypeOptionsBag`. Per-panel granularity; piggybacks on the existing cascade.
+### Q5.5. Group Requirement DueDate controls in the modal — **LOCKED: preserve WebForms parity, mirror GroupTypeDetail sibling**
 
-**Default recommendation:** option (a). Authorization is a per-user fact about the entity, not a per-GroupType fact, so it belongs on the GroupBag rather than the GroupTypeOptionsBag. Phase 5 sub-features ALSO use ADMINISTRATE; one flag covers Sections 6, 7, 9 plus Section 6 visibility.
+DueDate controls render inside a conditional well in the modal, gated on `DueDateType ∈ { ConfiguredDate, GroupAttribute }`. Mirror the canonical pattern at [Rock.JavaScript.Obsidian.Blocks/src/Group/GroupTypeDetail/groupRequirements.partial.obs:49-58, 184-238](../../Rock.JavaScript.Obsidian.Blocks/src/Group/GroupTypeDetail/groupRequirements.partial.obs:49):
 
-### Q5.4. Phase 4 carry-forward — Add-path cascade refresh of `bag.attributes`
+- `renderDueDateSection` computed returns true only when the selected GroupRequirementType's `dueDateType` is `ConfiguredDate` or `GroupAttribute`.
+- Inside the conditional div: `<DatePicker v-if="dueDateType === DueDateType.ConfiguredDate" v-model="dueDateStaticDate">` OR `<DropDownList v-if="dueDateType === DueDateType.GroupAttribute" :items="groupAttributeOptions">`.
+- When the user picks a new GroupRequirementType, `dueDateType` updates from the type bag and the previous mode's value (`dueDateStaticDate` or `dueDateAttribute`) is cleared.
 
-**Background.** When the user picks a different GroupType in Add mode, the Group Attribute definitions should refresh to match the new GroupType's qualified attribute set. Phase 3's reactive `groupTypeId` watcher fetches `GroupTypeOptionsBag` but does not re-fetch `bag.attributes`.
+Empty Figma capture is treated as a default-state omission; the data lives in `GroupRequirement.DueDateOffsetInDays` / `DueDateAttributeId` and must remain editable.
 
-**Default recommendation:** extend the reactive watcher to additionally call `Edit` block action on cascade (re-fetching the full bag for the entity, which would surface the new attribute set). Cost: one extra round-trip per cascade in Add mode. Alternative: extend `GroupTypeOptionsBag` to carry `GroupAttributes: Record<string, PublicAttributeBag>` for Add-mode cascade refresh; only Add mode needs this (Edit mode's GroupType is read-only).
+### Q5.6. Editable Requirements grid columns — **LOCKED: match the Figma (6 columns)**
 
-### Q5.5. Group Requirement DueDate controls in the modal
-
-**Background.** WebForms shows DatePicker OR DueDateGroupAttribute dropdown conditionally based on `GroupRequirementType.DueDateType`. The captured design (frame [edit-modal-02-requirement.png](../design/screenshots/edit-modal-02-requirement.png)) does NOT show these controls.
-
-**Default recommendation:** preserve WebForms parity — DueDate controls render inside a conditional well in the modal when `DueDateType ∈ { ConfiguredDate, GroupAttribute }`. Captured screenshot is likely a default-state capture.
-
-### Q5.6. Editable Requirements grid columns
-
-**Background.** WebForms grid has 9 columns (Name / Group Role / Age Classification / Data View / Required For New Members / Can Expire / Type / Edit / Delete). Design ([edit-section-07.png](../design/screenshots/edit-section-07.png)) shows 6 (Type / Group Role / Age Classification / Required Before Adding / Edit / Delete). "Data View", "Can Expire", "RequirementCheckType" columns are dropped.
-
-**Default recommendation:** match the design (drop the three columns from the grid). The dropped data is still surfaced inside the Add/Edit modal; the grid just doesn't show them at a glance.
+Editable "Specific Group Requirements" Grid renders 6 columns: **Type / Group Role / Age Classification / Required Before Adding / Edit / Delete**. WebForms columns **Data View**, **Can Expire**, and **RequirementCheckType** are dropped from the at-a-glance grid view. All three still live inside the Add/Edit modal so the data remains editable. Figma's "Required Before Adding" label replaces WebForms "Required For New Members" (same column data, clearer wording).
 
 ## Research coverage
 
@@ -162,7 +152,7 @@ W7. Post-save: invoke `GroupMemberWorkflowTriggerService.RemoveCachedTriggers()`
 ### Misc — Phase 4 carry-forwards
 
 Misc-1. Section 6 ADMINISTRATE / `AllowSpecificGroupMemberAttributes` gate. Add `bag.CanAdministrate` flag (per Q5.3 lock) populated in `GetCommonEntityBag` from `entity.IsAuthorized(Authorization.ADMINISTRATE, ...)`. Wrap the Section 6 `<ContentSection>` in `v-if="canAdministrate && (allowsCustom || hasAnyMemberAttributes)"`. One-line additions per side.
-Misc-2. Add-path GroupType cascade refresh of `bag.attributes`. Implement per Q5.4 lock — extend the reactive watcher OR extend the cascade payload. Decide during spec lock.
+~~Misc-2.~~ ~~Add-path GroupType cascade refresh of `bag.attributes`.~~ **RESOLVED in Phase 4 post-commit audit; no Phase 5 work needed.** See the Q5.4 resolution above.
 
 ### V. Vue file structure
 

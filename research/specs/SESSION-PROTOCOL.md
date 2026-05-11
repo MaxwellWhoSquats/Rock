@@ -25,11 +25,17 @@ Everything else is in this file.
 Before writing any code, read these files in this exact order. Read in full, not skim:
 
 1. **`research/specs/SESSION-PROTOCOL.md`** (this file) — the procedure.
+
 2. **`research/specs/INDEX.md`** — current status, identifies which phase you're in.
+
 3. **`research/specs/00-architecture.md`** — master cross-phase decisions. If status is still "Draft", surface the open questions to the user before proceeding.
+
 4. **`research/specs/ROADMAP.md`** — strategic context.
+
 5. **The current phase's spec file** (e.g., `research/specs/0N-phase-N-<name>.md`).
+
 6. **Every file listed in the phase spec's "Research coverage" section**, in full.
+
 7. **The "Completed" section of every prior phase spec** that is marked `completed` in INDEX.md.
 
 8. **Verify deferred-behavior carry-forward.** Walk every prior phase's coverage report and find every row whose Status is `→ DEFERRED to Phase N` where N matches the current phase. Confirm the current phase spec's "Deferred behaviors inherited from prior phases" section enumerates each. Cross-check that each one is either addressed by an Implementation checklist item OR explicitly re-deferred / dropped (with rationale) under the relevant subsection of inherited-behaviors. If any deferred row points at this phase but isn't accounted for, **stop and ask** — the spec is incomplete.
@@ -66,12 +72,14 @@ Procedure:
 ### C1. Walk the Implementation checklist
 
 For every item in the phase spec's "Implementation checklist":
+
 - Identify the file:line where it's implemented in your changes.
 - If you cannot find it, that item is **NOT done** — implement it before continuing.
 
 ### C2. Walk every Research coverage file
 
 For every file listed in the phase spec's "Research coverage" section:
+
 - Re-read the file (you read it in Section A; re-read with implementation eyes now).
 - Identify every behavior, validation, side effect, edge case, error path, and explicit "Open question" relevant to this phase's scope.
 - Classify each as one of:
@@ -95,6 +103,7 @@ Build the coverage report as a markdown table. This goes into the phase spec's "
 ### C4. Halt criteria
 
 The phase is **not done** if any of these hold:
+
 - Any row in the coverage report shows ✗ MISSED.
 - `/build` reports errors.
 - `/test` (if applicable) reports failures.

@@ -432,4 +432,50 @@ See "C5 — New latent bugs / TODOs surfaced" above.
 
 ### Commit hash
 
-Awaiting user commit; commit hash to be filled in after `git commit` lands.
+Initial Phase 4 commit: `f789db3b40` (phase 4 code, 2026-05-11).
+
+## Post-commit iterative review (2026-05-11)
+
+After the initial Phase 4 commit landed, a review pass surfaced three follow-ups. They are tracked here (rather than rolled into Phase 5) because they are pure corrections to what Phase 4 shipped, not new behavior.
+
+### IR-4-1 (committed `5e2ec9efc5`) — Section 5 refactored to use `displayAsContentSection`
+
+Replaced the manual `groupAttributeCategories` computed (~80 lines: type definition + grouping logic + `hasVisibleGroupAttributes` + the `<ContentStack v-for>` template wrapper) with a single `<AttributeValuesContainer :displayAsContentSection="true" ...>` invocation. The shared control already handles ContentSection wrapping, per-category ContentStacks, default-category-first ordering, empty-category dropping, and 2-column layout. Two prop additions support the use case:
+
+- `contentSectionTitle: string` (default `"Attributes"`) on `attributeValuesContainer.obs` — lets Section 5 say "Group Attributes" without forking the control.
+- `globalCategoryNameOverride="Set Additional Attributes"` (existing prop) — relabels the default categoryless stack per the Figma "Set Additional Attributes" wording.
+
+`contentSectionTitle` prop addition shipped separately as `5e2ec9efc5` (control change) so the GroupDetail-block-only diff stays surgical.
+
+### IR-4-2 — Cascade attribute refresh via canonical `RefreshAttributes` (resolves Phase 5 Q5.4 / Misc-2)
+
+Added a single line to `GetObsidianBlockInitialization`:
+
+```csharp
+box.QualifiedAttributeProperties = AttributeCache.GetAttributeQualifiedColumns<Model.Group>();
+```
+
+This is the framework-canonical pattern. The existing wiring (`useEntityDetailBlock` in `groupDetail.obs:104` + `@propertyChanged="baseBlock.onPropertyChanged"` in `groupDetail.obs:41` + `watchPropertyChanges(propRefs, emit)` in `editPanel.partial.obs:992`) automatically:
+
+1. Detects `GroupTypeId` propertyRef changes.
+2. Forwards the property name to the baseBlock handler.
+3. Checks the new `QualifiedAttributeProperties` list (case-insensitive match).
+4. Debounces and calls the inherited `RockEntityDetailBlockType.RefreshAttributes` block action (`Rock.Blocks/RockEntityDetailBlockType.cs:132`).
+5. Server `RefreshAttributes` calls `TryGetEntityForEditAction` (handles Add and Edit), `UpdateEntityFromBox` (applies new GroupTypeId to the entity), `LoadAttributes`, then `GetEntityBagForEdit` to return the new bag.
+6. `block.ts:refreshEntityDetailAttributes` merges the new `attributes` + `attributeValues` into `groupEditBag.value.bag`, preserving user-typed values for Attribute Guids that exist in both old and new lists.
+
+Drops the entire Q5.4 / Misc-2 deferral. The earlier prototype that extended `GroupTypeOptionsBag` with attribute fields + a manual bag mutation in the cascade watcher was reverted in favor of this.
+
+**Parity addition:** the same `box.QualifiedAttributeProperties = AttributeCache.GetAttributeQualifiedColumns<GroupType>()` line was added to `GroupTypeDetail.cs:GetObsidianBlockInitialization`, which had the same gap. Out-of-scope for Phase 4 strictly speaking, but a one-line parity fix on the canonical sibling block.
+
+### IR-4-3 — `BuildInheritedMemberAttributes` URL fallback removed
+
+`BuildInheritedMemberAttributes` previously fell back to `GetCurrentPageUrl(GroupTypeId=<idKey>)` when `EntityType.LinkUrlLavaTemplate` for GroupType was unconfigured. This pattern was copied from `GroupTypeDetail.cs:1952-1958` where it works (current page IS GroupTypeDetail), but on GroupDetail it produces a broken link to the current group with a stray `GroupTypeId` param. The fallback was removed; the Vue grid template already renders the inherited-from name as plain text when `inheritedFromGroupTypeUrl` is empty.
+
+### Rename: `GroupTypeInheritedAttributeBag` → `GroupMemberInheritedAttributeBag`
+
+During the review pass MP-4.1's cross-namespace import was replaced with a new bag dedicated to GroupDetail's needs. The new `Rock.ViewModels.Blocks.Group.GroupDetail.GroupMemberInheritedAttributeBag` carries only the fields Section 6 needs (Name / Description / Key / Guid / InheritedFromGroupTypeName / InheritedFromGroupTypeUrl). This decoupled GroupDetail from the GroupTypeDetail bag's evolution.
+
+### Considered-and-skipped — `SaveGroupMemberAttributes` SaveChanges-in-loop
+
+[GroupDetail.cs:1156-1160](../../Rock.Blocks/Group/GroupDetail.cs:1156) calls `RockContext.SaveChanges()` inside the delete loop instead of once after all deletions like WebForms does ([GroupDetail.ascx.cs:1348-1359](../../RockWeb/Blocks/Groups/GroupDetail.ascx.cs:1348)). Audit caught this; user opted to leave as-is. **Reason:** correctness is unchanged (the calls run inside `WrapTransaction`), the cardinality is small (group-member attribute definitions per group are typically 0-10 rows), and the deletion path is rare (only fires when a definition is removed). Performance smell, not a bug; not worth a code change.
