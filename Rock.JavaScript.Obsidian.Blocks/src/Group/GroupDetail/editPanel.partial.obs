@@ -313,14 +313,22 @@
         </ContentSection>
 
         <!-- ========================== -->
-        <!-- Sections 5 / 6 / 7 - placeholders -->
+        <!-- Section 5 - Group Attribute Values -->
         <!-- ========================== -->
-        <ContentSection title="Group Attributes" description="Custom field values defined on the group type.">
-            <NotificationBox alertType="info">Coming in Phase 4.</NotificationBox>
-        </ContentSection>
+        <AttributeValuesContainer v-model="attributeValues"
+                                  :attributes="attributes"
+                                  :isEditMode="true"
+                                  :displayAsContentSection="true"
+                                  contentSectionTitle="Group Attributes"
+                                  globalCategoryNameOverride="Set Additional Attributes" />
 
-        <ContentSection title="Group Member Attributes" description="Per-group attribute definitions used by every member.">
-            <NotificationBox alertType="info">Coming in Phase 4.</NotificationBox>
+        <!-- ========================== -->
+        <!-- Section 6 - Group Member Attribute Definitions -->
+        <!-- ========================== -->
+        <ContentSection title="Group Member Attributes"
+                        description="Per-group attribute definitions used by every member.">
+            <GroupMemberAttributes v-model:groupMemberAttributes="groupMemberAttributes"
+                                   :inheritedGroupMemberAttributes="inheritedMemberAttributes" />
         </ContentSection>
 
         <ContentSection title="Group Requirements" description="Requirements every member must meet.">
@@ -395,6 +403,8 @@
     import { TimePickerValue } from "@Obsidian/ViewModels/Controls/timePickerValue";
     import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
     import { GroupTypeOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag";
+    import { GroupMemberInheritedAttributeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberInheritedAttributeBag";
+    import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
     import { ValidPropertiesBox } from "@Obsidian/ViewModels/Utility/validPropertiesBox";
     import { setPropertiesBoxValue, watchPropertyChanges } from "@Obsidian/Utility/block";
     import { propertyRef, updateRefValue } from "@Obsidian/Utility/component";
@@ -403,6 +413,8 @@
     import ContentSection from "@Obsidian/Controls/contentSection.obs";
     import ContentStack from "@Obsidian/Controls/contentStack.obs";
     import ConditionalWell from "@Obsidian/Controls/conditionalWell.obs";
+    import AttributeValuesContainer from "@Obsidian/Controls/attributeValuesContainer.obs";
+    import GroupMemberAttributes from "./groupMemberAttributes.partial.obs";
     import TextBox from "@Obsidian/Controls/textBox.obs";
     import CheckBox from "@Obsidian/Controls/checkBox.obs";
     import CheckBoxList from "@Obsidian/Controls/checkBoxList.obs";
@@ -481,6 +493,8 @@
         || (props.modelValue.bag?.nonLeaderToNonLeaderRelationshipMultiplierOverride ?? null) !== null
     );
 
+    const attributes = ref(props.modelValue.bag?.attributes ?? {});
+    const attributeValues = ref(props.modelValue.bag?.attributeValues ?? {});
     const name = propertyRef(props.modelValue.bag?.name ?? "", "Name");
     const description = propertyRef(props.modelValue.bag?.description ?? "", "Description");
     const isActive = propertyRef(props.modelValue.bag?.isActive ?? true, "IsActive");
@@ -525,6 +539,7 @@
     const isChatChannelAlwaysShownOverride = propertyRef<boolean | null>(props.modelValue.bag?.isChatChannelAlwaysShownOverride ?? null, "IsChatChannelAlwaysShownOverride");
     const chatPushNotificationModeOverride = propertyRef<ChatNotificationMode | null>(props.modelValue.bag?.chatPushNotificationModeOverride ?? null, "ChatPushNotificationModeOverride");
     const chatChannelAvatarBinaryFile = propertyRef<ListItemBag | null>(props.modelValue.bag?.chatChannelAvatarBinaryFile ?? null, "ChatChannelAvatarBinaryFile");
+    const groupMemberAttributes = propertyRef<PublicEditableAttributeBag[]>(props.modelValue.bag?.groupMemberAttributes ?? [], "GroupMemberAttributes");
 
     // The properties that are being edited. This should only contain
     // objects returned by propertyRef().
@@ -538,7 +553,8 @@
         schedulingMustMeetRequirements, disableScheduling, disableScheduleToolboxAccess,
         scheduleConfirmationLogic, scheduleCoordinatorPerson, scheduleCoordinatorNotificationTypes, attendanceRecordRequiredForCheckIn,
         isChatEnabledOverride, isLeavingChatChannelAllowedOverride, isChatChannelPublicOverride,
-        isChatChannelAlwaysShownOverride, chatPushNotificationModeOverride, chatChannelAvatarBinaryFile];
+        isChatChannelAlwaysShownOverride, chatPushNotificationModeOverride, chatChannelAvatarBinaryFile,
+        groupMemberAttributes];
 
     // #endregion
 
@@ -800,6 +816,10 @@
         }));
     });
 
+    const inheritedMemberAttributes = computed((): GroupMemberInheritedAttributeBag[] => {
+        return props.groupTypeOptions?.inheritedMemberAttributes ?? [];
+    });
+
     // #endregion
 
     // #region Watchers
@@ -808,7 +828,8 @@
     // updateRefValue no-ops when values are equal, so this terminates
     // any echo loop with the outbound watcher below.
     watch(() => props.modelValue, () => {
-        // Section 1
+        updateRefValue(attributes, props.modelValue.bag?.attributes ?? {});
+        updateRefValue(attributeValues, props.modelValue.bag?.attributeValues ?? {});
         updateRefValue(name, props.modelValue.bag?.name ?? "");
         updateRefValue(description, props.modelValue.bag?.description ?? "");
         updateRefValue(isActive, props.modelValue.bag?.isActive ?? true);
@@ -867,11 +888,14 @@
         updateRefValue(isChatChannelAlwaysShownOverride, props.modelValue.bag?.isChatChannelAlwaysShownOverride ?? null);
         updateRefValue(chatPushNotificationModeOverride, props.modelValue.bag?.chatPushNotificationModeOverride ?? null);
         updateRefValue(chatChannelAvatarBinaryFile, props.modelValue.bag?.chatChannelAvatarBinaryFile ?? null);
+
+        // Section 5 + 6 — Attributes.
+        updateRefValue(groupMemberAttributes, props.modelValue.bag?.groupMemberAttributes ?? []);
     });
 
     // Outbound: emit a fresh ValidPropertiesBox when any tracked
     // propertyRef changes.
-    watch([...propRefs], () => {
+    watch([attributeValues, ...propRefs], () => {
         const newValue: ValidPropertiesBox<GroupBag> = {
             bag: { ...props.modelValue.bag } as GroupBag
         };
@@ -935,6 +959,10 @@
         setPropertiesBoxValue(newValue, "isChatChannelAlwaysShownOverride", isChatChannelAlwaysShownOverride.value);
         setPropertiesBoxValue(newValue, "chatPushNotificationModeOverride", chatPushNotificationModeOverride.value);
         setPropertiesBoxValue(newValue, "chatChannelAvatarBinaryFile", chatChannelAvatarBinaryFile.value);
+
+        // Section 5 + 6 — Attributes.
+        setPropertiesBoxValue(newValue, "attributeValues", attributeValues.value);
+        setPropertiesBoxValue(newValue, "groupMemberAttributes", groupMemberAttributes.value);
 
         emit("update:modelValue", newValue);
     });

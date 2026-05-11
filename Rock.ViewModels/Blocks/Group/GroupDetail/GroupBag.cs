@@ -587,5 +587,26 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public ListItemBag ChatChannelAvatarBinaryFile { get; set; }
 
         #endregion
+
+        #region Section 6 (Group Member Attribute Definitions)
+
+        /// <summary>
+        /// Gets or sets the editable per-group member attribute
+        /// definitions. Each entry is a full
+        /// <see cref="PublicEditableAttributeBag"/> so the
+        /// <c>&lt;AttributeEditor&gt;</c> modal can read and write every
+        /// configurable field (key, name, description, field type,
+        /// configuration values, categories, default value, etc.).
+        /// Persisted by the Save action via
+        /// <c>Rock.Attribute.Helper.SaveAttributeEdits</c> with
+        /// <c>entityTypeId = GroupMember.TypeId</c>,
+        /// <c>qualifierColumn = "GroupId"</c>, and
+        /// <c>qualifierValue = group.Id.ToString()</c>. Mirrors the
+        /// WebForms <c>GroupMemberAttributesState</c> at
+        /// <c>GroupDetail.ascx.cs:1338-1357</c>.
+        /// </summary>
+        public List<PublicEditableAttributeBag> GroupMemberAttributes { get; set; }
+
+        #endregion
     }
 }

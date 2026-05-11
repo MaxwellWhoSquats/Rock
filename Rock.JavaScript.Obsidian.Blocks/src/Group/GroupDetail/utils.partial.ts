@@ -16,7 +16,9 @@
 //
 
 import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
+import { FieldType } from "@Obsidian/SystemGuids/fieldType";
 import { TimePickerValue } from "@Obsidian/ViewModels/Controls/timePickerValue";
+import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
 
 /**
  * Converts a 0-1 decimal multiplier into the 0-100 percent integer the
@@ -147,4 +149,38 @@ export function formatTimeValue(value: TimePickerValue): string | null {
     const hh = value.hour.toString().padStart(2, "0");
     const mm = value.minute.toString().padStart(2, "0");
     return `${hh}:${mm}:00`;
+}
+
+/**
+ * Creates a new attribute instance suitable for editing with the AttributeEditor control.
+ * Centralized to reduce the risk of fixing attribute-default bugs in one place but not another.
+ */
+export function createNewAttribute(): PublicEditableAttributeBag {
+    return {
+        guid: "",
+        name: "",
+        description: "",
+        isActive: true,
+        isPublic: false,
+        isRequired: false,
+        isShowOnBulk: false,
+        isShowInGrid: false,
+        isAnalytic: false,
+        isAnalyticHistory: false,
+        isAllowSearch: false,
+        isEnableHistory: false,
+        isIndexEnabled: false,
+        isSystem: false,
+        fieldTypeGuid: FieldType.Text,
+        configurationValues: {},
+        categories: [],
+        key: "",
+        abbreviatedName: "",
+        preHtml: "",
+        postHtml: "",
+        defaultValue: "",
+        isSuppressHistoryLogging: false,
+        attributeColor: "",
+        iconCssClass: ""
+    };
 }

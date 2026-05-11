@@ -665,6 +665,10 @@ namespace Rock.Blocks.Group
             // not surfaced in edit mode (per Q3.7 lock).
             bag.RoleLimitWarning = null;
 
+            bag.LoadAttributesAndValuesForPublicEdit( entity, RequestContext.CurrentPerson, enforceSecurity: true );
+
+            bag.GroupMemberAttributes = LoadGroupMemberAttributes( entity );
+
             return bag;
         }
 
@@ -911,6 +915,12 @@ namespace Rock.Blocks.Group
                 }
             } );
 
+            box.IfValidProperty( nameof( box.Bag.AttributeValues ), () =>
+            {
+                entity.LoadAttributes( RockContext );
+                entity.SetPublicAttributeValues( box.Bag.AttributeValues, RequestContext.CurrentPerson, enforceSecurity: true );
+            } );
+
             return true;
         }
 
@@ -1090,6 +1100,74 @@ namespace Rock.Blocks.Group
                     // will fall back to ParentGroup-based auth.
                     entity.GroupType = null;
                     entity.GroupTypeId = 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Loads the editable per-group member attribute definitions
+        /// for the supplied entity. Returns an empty list for new groups
+        /// (Id == 0) since the qualifier value depends on the persisted
+        /// Id. Mirrors the WebForms <c>ShowEditDetails</c> hydration at
+        /// <c>GroupDetail.ascx.cs:2117-2126</c>.
+        /// </summary>
+        private List<PublicEditableAttributeBag> LoadGroupMemberAttributes( Model.Group entity )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                return new List<PublicEditableAttributeBag>();
+            }
+
+            var attributeService = new AttributeService( RockContext );
+            var qualifierValue = entity.Id.ToString();
+
+            return attributeService.GetByEntityTypeId( new GroupMember().TypeId, true )
+                .AsNoTracking()
+                .Where( a =>
+                    a.EntityTypeQualifierColumn.Equals( "GroupId", StringComparison.OrdinalIgnoreCase ) &&
+                    a.EntityTypeQualifierValue.Equals( qualifierValue ) )
+                .OrderBy( a => a.Order )
+                .ThenBy( a => a.Name )
+                .ToList()
+                .ConvertAll( a => PublicAttributeHelper.GetPublicEditableAttribute( a ) );
+        }
+
+        /// <summary>
+        /// Saves the per-group member attribute definitions for the
+        /// specified qualifier.
+        /// </summary>
+        /// <param name="qualifierColumn">The attribute qualifier column.</param>
+        /// <param name="qualifierValue">The qualifier value.</param>
+        /// <param name="attributes">The attributes as edited in the UI.</param>
+        private void SaveGroupMemberAttributes( string qualifierColumn, string qualifierValue, List<PublicEditableAttributeBag> attributes )
+        {
+            if ( attributes == null )
+            {
+                return;
+            }
+
+            var entityTypeId = new GroupMember().TypeId;
+
+            // Get the existing attributes for this entity type and qualifier value
+            var attributeService = new AttributeService( RockContext );
+            var existingAttributes = attributeService.GetByEntityTypeQualifier( entityTypeId, qualifierColumn, qualifierValue, true ).ToList();
+
+            // Delete any of those attributes that were removed in the UI
+            var remainingAttributeGuids = attributes.Select( a => a.Guid );
+            foreach ( var attr in existingAttributes.Where( a => !remainingAttributeGuids.Contains( a.Guid ) ) )
+            {
+                attributeService.Delete( attr );
+                RockContext.SaveChanges();
+            }
+
+            // The attributes are coming from the frontend already sorted in the correct order.
+            int attributeOrder = 0;
+            foreach ( var attrBag in attributes )
+            {
+                var attr = Helper.SaveAttributeEdits( attrBag, entityTypeId, qualifierColumn, qualifierValue, RockContext );
+                if ( attr != null )
+                {
+                    attr.Order = attributeOrder++;
                 }
             }
         }
@@ -1277,6 +1355,16 @@ namespace Rock.Blocks.Group
                 {
                     Authorization.AllowPerson( entity, Authorization.ADMINISTRATE, RequestContext.CurrentPerson, RockContext );
                 }
+
+                // Step 4a — Persist Group attribute values (Section 5).
+                // Mirrors WebForms GroupDetail.ascx.cs:1336. SaveAttributeValues
+                // calls SaveChanges internally; the WrapTransaction keeps every
+                // SaveChanges in this block atomic.
+                entity.SaveAttributeValues( RockContext );
+
+                // Step 4b — Sync per-group member attribute definitions
+                // (Section 6). Mirrors WebForms GroupDetail.ascx.cs:1338-1357.
+                SaveGroupMemberAttributes( "GroupId", entity.Id.ToString(), box.Bag.GroupMemberAttributes );
 
                 // Step 5 — Inactive cascade to descendants.
                 if ( !entity.IsActive && box.Bag.InactivateChildGroups )
@@ -2214,7 +2302,7 @@ namespace Rock.Blocks.Group
             {
                 StatusValues = new List<ListItemBag>(),
                 InactiveReasons = new List<ListItemBag>(),
-                InheritedMemberAttributes = new List<PublicAttributeBag>()
+                InheritedMemberAttributes = new List<GroupMemberInheritedAttributeBag>()
             };
 
             if ( groupTypeId <= 0 )
@@ -2303,7 +2391,110 @@ namespace Rock.Blocks.Group
                     .ToList();
             }
 
+            // Inherited group-member attribute definitions (Section 6 read-only grid).
+            // Walks the group type's InheritedGroupTypeId chain server-side and
+            // emits each inherited member attribute with the immediate
+            // ancestor's name + URL for the link cell. Mirrors the WebForms
+            // BindInheritedAttributes walk at GroupDetail.ascx.cs:3157-3203 and
+            // the canonical GroupTypeDetail.GetInheritedAttributes pattern.
+            bag.InheritedMemberAttributes = BuildInheritedMemberAttributes( groupType );
+
             return bag;
+        }
+
+        /// <summary>
+        /// Walks the GroupType inheritance chain starting from the
+        /// supplied group type (inclusive) and collects every
+        /// group-member attribute definition reachable. From this
+        /// Group's perspective every GroupType-level attribute is
+        /// inherited - the Group entity does not define them itself;
+        /// only attributes qualified by GroupId belong to the Group.
+        /// Mirrors WebForms BindInheritedAttributes at
+        /// RockWeb/Blocks/Groups/GroupDetail.ascx.cs:3157 which is
+        /// invoked with group.GroupTypeId (not its parent). Each entry
+        /// carries the source ancestor's name and a navigation URL
+        /// resolved via the <see cref="EntityType.LinkUrlLavaTemplate"/>
+        /// for GroupType (falling back to the current page's IdKey-based
+        /// URL when no template is configured). Guards against circular
+        /// inheritance with a visited-id set.
+        /// </summary>
+        /// <param name="groupType">The active group type whose chain is walked (inclusive).</param>
+        private List<GroupMemberInheritedAttributeBag> BuildInheritedMemberAttributes( GroupTypeCache groupType )
+        {
+            var inheritedAttributes = new List<GroupMemberInheritedAttributeBag>();
+
+            if ( groupType == null )
+            {
+                return inheritedAttributes;
+            }
+
+            var attributeService = new AttributeService( RockContext );
+            var groupMemberEntityTypeId = new GroupMember().TypeId;
+            var groupTypeService = new GroupTypeService( RockContext );
+
+            // Resolve the URL template once per cascade.
+            var urlTemplate = EntityTypeCache.Get( typeof( GroupType ) )?.LinkUrlLavaTemplate;
+
+            var visitedGroupTypeIds = new HashSet<int>();
+            var inheritedGroupType = groupTypeService.Get( groupType.Id );
+
+            if ( inheritedGroupType == null )
+            {
+                return inheritedAttributes;
+            }
+
+            do
+            {
+                if ( !visitedGroupTypeIds.Add( inheritedGroupType.Id ) )
+                {
+                    break;
+                }
+
+                var qualifierValue = inheritedGroupType.Id.ToString();
+
+                string inheritedFromUrl = null;
+                if ( urlTemplate.IsNotNullOrWhiteSpace() )
+                {
+                    inheritedFromUrl = urlTemplate.ResolveMergeFields( new Dictionary<string, object>
+                    {
+                        ["Entity"] = inheritedGroupType
+                    } );
+                    inheritedFromUrl = this.RequestContext.ResolveRockUrl( inheritedFromUrl );
+                }
+
+                if ( inheritedFromUrl.IsNullOrWhiteSpace() )
+                {
+                    inheritedFromUrl = this.GetCurrentPageUrl( new Dictionary<string, string>
+                    {
+                        ["GroupTypeId"] = inheritedGroupType.IdKey
+                    } );
+                }
+
+                inheritedAttributes.AddRange(
+                    attributeService.GetByEntityTypeId( groupMemberEntityTypeId, false )
+                        .AsNoTracking()
+                        .Where( a =>
+                            a.EntityTypeQualifierColumn.Equals( "GroupTypeId", StringComparison.OrdinalIgnoreCase ) &&
+                            a.EntityTypeQualifierValue.Equals( qualifierValue ) )
+                        .OrderBy( a => a.Order )
+                        .ThenBy( a => a.Name )
+                        .Select( a => new GroupMemberInheritedAttributeBag
+                        {
+                            Name = a.Name,
+                            Description = a.Description,
+                            Key = a.Key,
+                            Guid = a.Guid,
+                            InheritedFromGroupTypeName = inheritedGroupType.Name,
+                            InheritedFromGroupTypeUrl = inheritedFromUrl
+                        } )
+                        .ToList() );
+
+                inheritedGroupType = inheritedGroupType.InheritedGroupTypeId.HasValue
+                    ? groupTypeService.Get( inheritedGroupType.InheritedGroupTypeId.Value )
+                    : null;
+            } while ( inheritedGroupType != null );
+
+            return inheritedAttributes;
         }
 
         /// <summary>

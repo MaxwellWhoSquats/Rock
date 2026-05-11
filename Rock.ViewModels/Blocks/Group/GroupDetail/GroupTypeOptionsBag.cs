@@ -286,15 +286,17 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
 
         #endregion
 
-        #region Phase 4 surfacing (read here so Phase 4 doesn't re-fetch on cascade)
+        #region Inherited member-attribute definitions (Section 6, read-only grid)
 
         /// <summary>
-        /// Gets or sets the inherited member-attribute definitions for the
-        /// active group type. Surfaced here so Phase 4's Section 6 surface
-        /// can consume the cascade payload directly. Phase 3 does not
-        /// render these; Phase 4 wires the Section 6 panel.
+        /// Gets or sets the inherited group-member attribute definitions
+        /// for the active group type. Walks the
+        /// <c>GroupType.InheritedGroupTypeId</c> chain server-side and
+        /// emits each attribute with the immediate ancestor's name + URL
+        /// for the Section 6 "Inherited Attributes" grid. Empty when the
+        /// chain yields no inherited member attributes.
         /// </summary>
-        public List<PublicAttributeBag> InheritedMemberAttributes { get; set; }
+        public List<GroupMemberInheritedAttributeBag> InheritedMemberAttributes { get; set; }
 
         #endregion
     }

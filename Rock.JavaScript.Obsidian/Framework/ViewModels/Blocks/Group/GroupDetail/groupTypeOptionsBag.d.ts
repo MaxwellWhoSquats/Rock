@@ -25,8 +25,8 @@ import { GroupLocationPickerMode } from "@Obsidian/Enums/Group/groupLocationPick
 import { RelationshipStrength } from "@Obsidian/Enums/Group/relationshipStrength";
 import { ScheduleType } from "@Obsidian/Enums/Group/scheduleType";
 import { Guid } from "@Obsidian/Types";
+import { GroupMemberInheritedAttributeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberInheritedAttributeBag";
 import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
-import { PublicAttributeBag } from "@Obsidian/ViewModels/Utility/publicAttributeBag";
 
 /**
  * Per-GroupType options consumed by the edit panel. Returned by the
@@ -76,12 +76,14 @@ export type GroupTypeOptionsBag = {
     inactiveReasons?: ListItemBag[] | null;
 
     /**
-     * Gets or sets the inherited member-attribute definitions for the
-     * active group type. Surfaced here so Phase 4's Section 6 surface
-     * can consume the cascade payload directly. Phase 3 does not
-     * render these; Phase 4 wires the Section 6 panel.
+     * Gets or sets the inherited group-member attribute definitions
+     * for the active group type. Walks the
+     * GroupType.InheritedGroupTypeId chain server-side and
+     * emits each attribute with the immediate ancestor's name + URL
+     * for the Section 6 "Inherited Attributes" grid. Empty when the
+     * chain yields no inherited member attributes.
      */
-    inheritedMemberAttributes?: PublicAttributeBag[] | null;
+    inheritedMemberAttributes?: GroupMemberInheritedAttributeBag[] | null;
 
     /**
      * Gets or sets a value indicating whether the Group Administrator

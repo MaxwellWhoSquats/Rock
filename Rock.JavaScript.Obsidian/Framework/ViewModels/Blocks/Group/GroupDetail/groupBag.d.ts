@@ -36,6 +36,7 @@ import { GroupMeetingLocationBag } from "@Obsidian/ViewModels/Blocks/Group/Group
 import { ParentGroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/parentGroupBag";
 import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 import { PublicAttributeBag } from "@Obsidian/ViewModels/Utility/publicAttributeBag";
+import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
 
 /**
  * The bag returned by the Group Detail block. Phase 1 ships the
@@ -155,6 +156,23 @@ export type GroupBag = {
      * blank in edit mode.
      */
     groupCapacity?: number | null;
+
+    /**
+     * Gets or sets the editable per-group member attribute
+     * definitions. Each entry is a full
+     * Utility.PublicEditableAttributeBag so the
+     * &lt;AttributeEditor&gt; modal can read and write every
+     * configurable field (key, name, description, field type,
+     * configuration values, categories, default value, etc.).
+     * Persisted by the Save action via
+     * Rock.Attribute.Helper.SaveAttributeEdits with
+     * entityTypeId = GroupMember.TypeId,
+     * qualifierColumn = "GroupId", and
+     * qualifierValue = group.Id.ToString(). Mirrors the
+     * WebForms GroupMemberAttributesState at
+     * GroupDetail.ascx.cs:1338-1357.
+     */
+    groupMemberAttributes?: PublicEditableAttributeBag[] | null;
 
     /**
      * Gets or sets the Member Record Source selected on the
