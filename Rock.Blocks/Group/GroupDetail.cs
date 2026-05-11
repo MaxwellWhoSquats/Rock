@@ -322,6 +322,7 @@ namespace Rock.Blocks.Group
 
             box.NavigationUrls = GetBoxNavigationUrls();
             box.Options = GetBoxOptions( entity, box.NavigationUrls );
+            box.QualifiedAttributeProperties = AttributeCache.GetAttributeQualifiedColumns<Model.Group>();
 
             return box;
         }
@@ -2462,13 +2463,13 @@ namespace Rock.Blocks.Group
                     inheritedFromUrl = this.RequestContext.ResolveRockUrl( inheritedFromUrl );
                 }
 
-                if ( inheritedFromUrl.IsNullOrWhiteSpace() )
-                {
-                    inheritedFromUrl = this.GetCurrentPageUrl( new Dictionary<string, string>
-                    {
-                        ["GroupTypeId"] = inheritedGroupType.IdKey
-                    } );
-                }
+                // Fallback intentionally left null when no
+                // LinkUrlLavaTemplate is configured. The current page
+                // here is GroupDetail (not GroupTypeDetail), so
+                // GetCurrentPageUrl with a GroupTypeId param would just
+                // reload the same group with a stray query string -
+                // worse than no link. The Vue grid renders the
+                // inherited-from name as plain text in this case.
 
                 inheritedAttributes.AddRange(
                     attributeService.GetByEntityTypeId( groupMemberEntityTypeId, false )
