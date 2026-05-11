@@ -11,6 +11,7 @@ This file flags design elements that don't map cleanly to existing Obsidian comp
 **Where it's used**: every collapsible section in the edit panel uses this. It's also visible in the View panel where each card is a `Section`.
 
 **Recommendation**:
+
 - Inspect already-converted refreshed blocks (e.g., `groupTypeDetail.obs`) to confirm whether shared components for Section / Section Stack already exist. The Figma metadata XML uses literal names "Section", "Section Header", "Section Body", "Section Stack" — strong signal that the design system already has these primitives.
 - If they exist: import and use.
 - If they don't: build new during Phase 1, since every later phase depends on them. Don't inline-build per section.
@@ -20,6 +21,7 @@ This file flags design elements that don't map cleanly to existing Obsidian comp
 **What it is**: a left-bordered subdued block that wraps content visible only when a parent toggle is on. Visual style: 4px or 8px left border in a primary color, slightly subdued background tint.
 
 **Where it's used**:
+
 - Inactive flow (Active checkbox unchecked → reason / note / cascade well).
 - Security Level (Enable as Security Role → level radio well).
 - Show Advanced Relationship Settings (switch on → growth + matrix well).
@@ -30,6 +32,7 @@ This file flags design elements that don't map cleanly to existing Obsidian comp
 - Add Group Location Schedules modal capacities.
 
 **Recommendation**:
+
 - This is consistent enough across the design that it should be a shared component, named e.g. `<ConditionalWell>`. Inspect refreshed blocks for an existing primitive.
 - If not yet shipped, build a small wrapper component during Phase 1.
 
@@ -40,10 +43,12 @@ This file flags design elements that don't map cleanly to existing Obsidian comp
 **Where it's used**: only the Add Group Sync Rule modal.
 
 **Why it doesn't fit**:
+
 - WebForms `IntervalPicker` is a number-input + dropdown of unit choices. The new control combines the two into a single visual.
 - The slider with embedded value pill is uncommon in the existing Obsidian set.
 
 **Recommendation**:
+
 - Option A: Build a new component for this single use. Cost: bounded scope, but maintenance for one consumer.
 - Option B: Restyle the existing `<IntervalPicker>` with a slider variant. Cost: cross-block component change risk.
 - Option C: Inline the segmented control + a basic `<RangeSlider>` and live with two adjacent controls (drop the unified visual). Cost: minor design fidelity loss.
@@ -57,11 +62,13 @@ Recommended: **Option A** during Phase 4, contained to the Group Sync modal. Spe
 **Where it's used**: View panel Meeting Locations section, one card per `GroupLocation`.
 
 **Why it may not fit**:
+
 - The map render (with markers, polygons, geofences) is non-trivial.
 - The hover-to-reveal interaction adds complexity beyond a static image card.
 - The card varies its behavior based on the underlying `Location.Type` (Address / Point / Polygon / GroupMember).
 
 **Recommendation**:
+
 - Identify whether a shared `<GroupMapCard>` or similar already exists in the converted GroupMap or GroupAttendanceList blocks.
 - If not, build during Phase 5. The interaction (hover overlay + click navigation) can use existing CSS patterns and a single button overlay.
 - The static map image can use the same Map Style block setting and the existing map-rendering helper that powers the WebForms Lava template.
@@ -73,6 +80,7 @@ Recommended: **Option A** during Phase 4, contained to the Group Sync modal. Spe
 **Where it's used**: View panel only.
 
 **Recommendation**:
+
 - Composable from existing primitives (border + label + list of links). No new shared component required.
 - Spec should define the bag shape: `linkages: { registrations, eventItemOccurrences, contentItems }: { name, url }[][]`.
 
@@ -95,11 +103,11 @@ The Capacity matrix has a help callout "Set the **person capacity** for each of 
 The radio in Section 2 stack 3 shows None / Casual / Close / Deep instead of None / Basic / Strong / Intense. The underlying enum values map to:
 
 | Display | Underlying value (presumed unchanged) |
-|---|---|
-| None | 0 |
-| Casual | 5 |
-| Close | 10 |
-| Deep | 20 |
+| ------- | ------------------------------------- |
+| None    | 0                                     |
+| Casual  | 5                                     |
+| Close   | 10                                    |
+| Deep    | 20                                    |
 
 Ensure the bag transmits the integer value and the Vue layer holds a label-mapping table. The C# enum `RelationshipStrength` should keep its existing names (None, Basic, Strong, Intense) for backward compatibility unless the user wants to rename the enum members too.
 
@@ -109,12 +117,12 @@ WebForms uses three-option dropdowns ("Inherit from Group Type" / "No" / "Yes") 
 
 ## Data model deltas
 
-| Field | WebForms data | Design data | Notes |
-|---|---|---|---|
-| Group image | (no photo column on Group today) | First-class image with Upload button | New `Group.PhotoId` column added in Phase 2 mirroring `Person.PhotoId` ([Person.cs:242](Rock/Model/CRM/Person/Person.cs:242)). See 00-architecture.md Q8. |
-| Coordinator Notifications None | Explicit checkbox list entry, mutually exclusive | Implicit "no boxes ticked" | Save logic shifts: empty selection → `ScheduleCoordinatorNotificationType.None`. |
-| Sync Frequency | `ScheduleIntervalMinutes : int?` | Same field, but UI computes minutes from segmented unit + slider value | Bag shape unchanged. |
-| Group attributes by category | All in one DynamicPlaceholder | Per-category sub-stacks | Bag may need to expose `attributesByCategory: { categoryName, attributes }[]` or the Vue layer can group them client-side. |
+| Field                          | WebForms data                                    | Design data                                                            | Notes                                                                                                                                                     |
+| ------------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Group image                    | (no photo column on Group today)                 | First-class image with Upload button                                   | New `Group.PhotoId` column added in Phase 2 mirroring `Person.PhotoId` ([Person.cs:242](Rock/Model/CRM/Person/Person.cs:242)). See 00-architecture.md Q8. |
+| Coordinator Notifications None | Explicit checkbox list entry, mutually exclusive | Implicit "no boxes ticked"                                             | Save logic shifts: empty selection → `ScheduleCoordinatorNotificationType.None`.                                                                          |
+| Sync Frequency                 | `ScheduleIntervalMinutes : int?`                 | Same field, but UI computes minutes from segmented unit + slider value | Bag shape unchanged.                                                                                                                                      |
+| Group attributes by category   | All in one DynamicPlaceholder                    | Per-category sub-stacks                                                | Bag may need to expose `attributesByCategory: { categoryName, attributes }[]` or the Vue layer can group them client-side.                                |
 
 ## Open questions / flag for spec phase
 
