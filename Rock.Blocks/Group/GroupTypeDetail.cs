@@ -102,6 +102,7 @@ namespace Rock.Blocks.Group
 
             box.NavigationUrls = GetBoxNavigationUrls();
             box.Options = GetBoxOptions();
+            box.QualifiedAttributeProperties = AttributeCache.GetAttributeQualifiedColumns<GroupType>();
 
             return box;
         }
