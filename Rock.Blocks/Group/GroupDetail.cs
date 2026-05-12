@@ -670,6 +670,11 @@ namespace Rock.Blocks.Group
 
             bag.GroupMemberAttributes = LoadGroupMemberAttributes( entity );
 
+            // Section 7 / 9 / 10 — Phase 5 list payloads.
+            bag.GroupRequirements = LoadGroupRequirements( entity );
+            bag.GroupSyncs = LoadGroupSyncs( entity );
+            bag.GroupMemberWorkflowTriggers = LoadGroupMemberWorkflowTriggers( entity );
+
             return bag;
         }
 
@@ -923,6 +928,146 @@ namespace Rock.Blocks.Group
             } );
 
             return true;
+        }
+
+        /// <summary>
+        /// Performs cross-field / collection-level validation that
+        /// cannot be expressed by <c>Group.IsValid</c> alone.
+        /// </summary>
+        /// <param name="group">The group entity (already mutated from the bag).</param>
+        /// <param name="bag">The bag containing the data from the client.</param>
+        /// <param name="errorMessage">On <c>false</c> return, contains the error message.</param>
+        /// <returns><c>true</c> if the bag passes Group-specific validation, <c>false</c> otherwise.</returns>
+        private bool ValidateGroup( Model.Group group, GroupBag bag, out string errorMessage )
+        {
+            errorMessage = null;
+
+            if ( group == null || bag == null )
+            {
+                return true;
+            }
+
+            // A Group Type must be chosen. Nothing else on the entity
+            // is meaningful without one, so this fires first.
+            if ( group.GroupTypeId <= 0 )
+            {
+                errorMessage = WarningMessage.CannotBeBlank( Model.GroupType.FriendlyTypeName );
+                return false;
+            }
+
+            // A saved group cannot list itself as its own parent.
+            if ( group.Id != 0 && group.ParentGroupId == group.Id )
+            {
+                errorMessage = "Group cannot be a Parent Group of itself.";
+                return false;
+            }
+
+            // The chosen Group Type must be in the parent group's
+            // AllowedChildGroupTypes list (when there is a parent).
+            // Reuses the already-loaded ParentGroup navigation when
+            // available (e.g. when ApplyNewGroupDefaultValues
+            // pre-populated it on the Add-from-tree path) to avoid a
+            // redundant query.
+            if ( group.ParentGroupId.HasValue )
+            {
+                var parentGroup = group.ParentGroup ?? new GroupService( RockContext ).Get( group.ParentGroupId.Value );
+                if ( parentGroup != null )
+                {
+                    var allowedGroupTypeIds = GetAllowedGroupTypes( GroupTypeCache.Get( parentGroup.GroupTypeId ), RockContext )
+                        .Select( gt => gt.Id )
+                        .ToList();
+                    if ( !allowedGroupTypeIds.Contains( group.GroupTypeId ) )
+                    {
+                        var groupTypeForError = GroupTypeCache.Get( group.GroupTypeId );
+                        errorMessage = $"The '{parentGroup.Name}' group does not allow child groups with a '{groupTypeForError?.Name ?? string.Empty}' group type.";
+                        return false;
+                    }
+                }
+            }
+
+            // Re-check EDIT now that GroupType / ParentGroup may have
+            // been swapped: the initial EDIT auth granted at block
+            // entry may no longer apply.
+            if ( !group.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
+            {
+                errorMessage = $"Not authorized to edit {Model.Group.FriendlyTypeName}.";
+                return false;
+            }
+
+            // Model-level rules (e.g. GroupsRequireCampus). Runs
+            // before the collection checks below so a fundamentally
+            // unsaveable entity surfaces its own error first.
+            if ( !group.IsValid )
+            {
+                errorMessage = group.ValidationResults
+                    .Select( r => r.ErrorMessage )
+                    .ToList()
+                    .AsDelimited( "; " );
+                return false;
+            }
+
+            // Every Group Sync row must carry its required foreign keys.
+            // The modal enforces this with rules="required" on Role and
+            // DataView, but the server refuses to silently coerce missing
+            // values to id 0, which would otherwise persist an orphaned
+            // sync row.
+            foreach ( var sync in bag.GroupSyncs ?? new List<GroupSyncBag>() )
+            {
+                if ( sync.GroupTypeRole?.Value.IsNullOrWhiteSpace() != false )
+                {
+                    errorMessage = "Each group sync rule must specify a sync role.";
+                    return false;
+                }
+
+                if ( sync.SyncDataView?.Value.IsNullOrWhiteSpace() != false )
+                {
+                    errorMessage = "Each group sync rule must specify a sync data view.";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Synchronizes related entities by comparing existing entities
+        /// with incoming bags, deleting removed items, and adding or
+        /// updating per the incoming list. Mirrors the canonical
+        /// pattern at <c>GroupTypeDetail.cs:760</c>.
+        /// </summary>
+        private void SyncRelatedEntities<TEntity, TBag, TKey>(
+            Service<TEntity> service,
+            IQueryable<TEntity> existingEntitiesQuery,
+            IEnumerable<TBag> incomingBags,
+            Func<TEntity, TKey> existingKeySelector,
+            Func<TBag, TKey> incomingKeySelector,
+            Func<TBag, TEntity> createNew,
+            Action<TEntity, TBag> updateEntity )
+            where TEntity : Entity<TEntity>, new()
+        {
+            var existingEntities = existingEntitiesQuery.ToList();
+            var existingByKey = existingEntities.ToDictionary( existingKeySelector );
+
+            var incomingList = ( incomingBags ?? Enumerable.Empty<TBag>() ).ToList();
+            var incomingKeys = incomingList.Select( incomingKeySelector ).ToHashSet();
+
+            foreach ( var entity in existingEntities.Where( e => !incomingKeys.Contains( existingKeySelector( e ) ) ).ToList() )
+            {
+                service.Delete( entity );
+            }
+
+            foreach ( var bag in incomingList )
+            {
+                var key = incomingKeySelector( bag );
+
+                if ( !existingByKey.TryGetValue( key, out var entity ) )
+                {
+                    entity = createNew( bag );
+                    service.Add( entity );
+                }
+
+                updateEntity( entity, bag );
+            }
         }
 
         /// <inheritdoc/>
@@ -1278,22 +1423,10 @@ namespace Rock.Blocks.Group
             var oldChatChannelAvatarId = entity.ChatChannelAvatarBinaryFileId;
             var oldScheduleId = entity.ScheduleId;
 
-            // Validation gate 1 — Group Type chosen.
-            if ( !box.Bag.GroupTypeId.HasValue || box.Bag.GroupTypeId.Value <= 0 )
-            {
-                return ActionBadRequest( WarningMessage.CannotBeBlank( Model.GroupType.FriendlyTypeName ) );
-            }
-
             // Apply scalar field assignments.
             if ( !UpdateEntityFromBox( entity, box ) )
             {
                 return ActionBadRequest( "Invalid data." );
-            }
-
-            // Validation gate 2 — self-parent check.
-            if ( entity.Id != 0 && entity.ParentGroupId == entity.Id )
-            {
-                return ActionBadRequest( "Group cannot be a Parent Group of itself." );
             }
 
             // Apply photo / chat-avatar / inline-schedule mutations
@@ -1304,43 +1437,16 @@ namespace Rock.Blocks.Group
             ApplyChatChannelAvatarBinaryFile( entity, box.Bag );
             ApplyInlineSchedule( entity, box.Bag );
 
-            // Validation gate 5 — parent allows this group type. Reuse
-            // the already-loaded ParentGroup navigation when available
-            // (e.g., when ApplyNewGroupDefaultValues pre-populated it on
-            // the Add-from-tree path) to avoid a redundant query.
-            if ( entity.ParentGroupId.HasValue )
+            // Validation
+            if ( !ValidateGroup( entity, box.Bag, out var validationMessage ) )
             {
-                var parentGroup = entity.ParentGroup ?? new GroupService( RockContext ).Get( entity.ParentGroupId.Value );
-                if ( parentGroup != null )
-                {
-                    var allowedGroupTypeIds = GetAllowedGroupTypes( GroupTypeCache.Get( parentGroup.GroupTypeId ), RockContext )
-                        .Select( gt => gt.Id )
-                        .ToList();
-                    if ( !allowedGroupTypeIds.Contains( entity.GroupTypeId ) )
-                    {
-                        var groupTypeForError = GroupTypeCache.Get( entity.GroupTypeId );
-                        return ActionBadRequest( $"The '{parentGroup.Name}' group does not allow child groups with a '{groupTypeForError?.Name ?? string.Empty}' group type." );
-                    }
-                }
-            }
-
-            // Validation gate 6 — re-check EDIT now that GroupType /
-            // ParentGroup may have been swapped.
-            if ( !entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
-            {
-                return ActionBadRequest( $"Not authorized to edit {Model.Group.FriendlyTypeName}." );
-            }
-
-            // Validation gate 8 — Group.IsValid (model-level rules,
-            // including GroupsRequireCampus).
-            if ( !entity.IsValid )
-            {
-                return ActionBadRequest( entity.ValidationResults.Select( r => r.ErrorMessage ).ToList().AsDelimited( "; " ) );
+                return ActionBadRequest( validationMessage );
             }
 
             var isNew = entity.Id == 0;
             var addAdministrateSecurity = isNew
                 && GetAttributeValue( AttributeKey.AddAdministrateSecurityToGroupCreator ).AsBoolean();
+            var triggersUpdated = false;
 
             RockContext.WrapTransaction( () =>
             {
@@ -1366,6 +1472,27 @@ namespace Rock.Blocks.Group
                 // Step 4b — Sync per-group member attribute definitions
                 // (Section 6). Mirrors WebForms GroupDetail.ascx.cs:1338-1357.
                 SaveGroupMemberAttributes( "GroupId", entity.Id.ToString(), box.Bag.GroupMemberAttributes );
+
+                // Step 4c — Sync per-group Group Requirements
+                // (Section 7). Deferred-insert pattern; group.Id is
+                // already assigned by step 3. Mirrors WebForms
+                // GroupDetail.ascx.cs:845-886 + 1330-1334.
+                SaveGroupRequirements( entity, box.Bag.GroupRequirements );
+
+                // Step 4d — Sync per-group Group Syncs (Section 9).
+                // Mirrors WebForms GroupDetail.ascx.cs:861-867 +
+                // 1011-1022.
+                SaveGroupSyncs( entity, box.Bag.GroupSyncs );
+
+                // Step 4e — Sync per-group Member Workflow Triggers
+                // (Section 10). Tracks whether any add/update/delete
+                // occurred so the post-transaction
+                // RemoveCachedTriggers() invalidation fires. Mirrors
+                // WebForms GroupDetail.ascx.cs:853-858 + 1024-1041.
+                if ( SaveGroupMemberWorkflowTriggers( entity, box.Bag.GroupMemberWorkflowTriggers ) )
+                {
+                    triggersUpdated = true;
+                }
 
                 // Step 5 — Inactive cascade to descendants.
                 if ( !entity.IsActive && box.Bag.InactivateChildGroups )
@@ -1408,6 +1535,13 @@ namespace Rock.Blocks.Group
             if ( wasSecurityRole != isNowSecurityRole )
             {
                 Authorization.Clear();
+            }
+
+            // Cache invalidation — workflow-trigger registry. Mirrors
+            // WebForms GroupDetail.ascx.cs:1427-1430.
+            if ( triggersUpdated )
+            {
+                GroupMemberWorkflowTriggerService.RemoveCachedTriggers();
             }
 
             // Honor a same-origin ?returnUrl=N if set, mirroring WebForms
@@ -2303,7 +2437,8 @@ namespace Rock.Blocks.Group
             {
                 StatusValues = new List<ListItemBag>(),
                 InactiveReasons = new List<ListItemBag>(),
-                InheritedMemberAttributes = new List<GroupMemberInheritedAttributeBag>()
+                InheritedMemberAttributes = new List<GroupMemberInheritedAttributeBag>(),
+                InheritedGroupRequirements = new List<InheritedGroupRequirementBag>()
             };
 
             if ( groupTypeId <= 0 )
@@ -2399,6 +2534,20 @@ namespace Rock.Blocks.Group
             // BindInheritedAttributes walk at GroupDetail.ascx.cs:3157-3203 and
             // the canonical GroupTypeDetail.GetInheritedAttributes pattern.
             bag.InheritedMemberAttributes = BuildInheritedMemberAttributes( groupType );
+
+            // Section 6 / 7 / 9 / 10 panel-level visibility gates and
+            // dropdown sources (Phase 5).
+            bag.AllowSpecificGroupMemberAttributes = groupType.AllowSpecificGroupMemberAttributes;
+            bag.EnableSpecificGroupRequirements = groupType.EnableSpecificGroupRequirements;
+            bag.AllowGroupSync = groupType.AllowGroupSync;
+            bag.AllowSpecificGroupMemberWorkflows = groupType.AllowSpecificGroupMemberWorkflows;
+
+            bag.InheritedGroupRequirements = BuildInheritedGroupRequirements( groupType );
+
+            bag.GroupRequirementTypeOptions = BuildGroupRequirementTypeOptions();
+            bag.GroupRoleOptions = BuildGroupRoleOptions( groupType );
+            bag.GroupAttributeOptions = BuildGroupDateAttributeOptions( groupType );
+            bag.SystemCommunicationOptions = BuildSystemCommunicationOptions();
 
             return bag;
         }
@@ -2496,6 +2645,684 @@ namespace Rock.Blocks.Group
             } while ( inheritedGroupType != null );
 
             return inheritedAttributes;
+        }
+
+        /// <summary>
+        /// Walks the GroupType inheritance chain starting from the
+        /// supplied group type (inclusive) and collects every group
+        /// requirement defined at any ancestor GroupType level. From
+        /// this Group's perspective every GroupType-level requirement
+        /// is inherited - the Group entity contributes its own
+        /// requirements via the editable Section 7 stack. Mirrors the
+        /// inheritance pattern <see cref="BuildInheritedMemberAttributes"/>
+        /// uses for Section 6 inherited attributes. Each entry carries
+        /// the source ancestor's name and a navigation URL resolved via
+        /// the <see cref="EntityType.LinkUrlLavaTemplate"/> for
+        /// GroupType. Guards against circular inheritance with a
+        /// visited-id set.
+        /// </summary>
+        /// <param name="groupType">The group type to start from.</param>
+        private List<InheritedGroupRequirementBag> BuildInheritedGroupRequirements( GroupTypeCache groupType )
+        {
+            var inheritedRequirements = new List<InheritedGroupRequirementBag>();
+
+            if ( groupType == null )
+            {
+                return inheritedRequirements;
+            }
+
+            var groupRequirementService = new GroupRequirementService( RockContext );
+            var groupTypeService = new GroupTypeService( RockContext );
+
+            // Resolve the URL template once per cascade.
+            var urlTemplate = EntityTypeCache.Get( typeof( Model.GroupType ) )?.LinkUrlLavaTemplate;
+
+            var visitedGroupTypeIds = new HashSet<int>();
+            var inheritedGroupType = groupTypeService.Get( groupType.Id );
+
+            if ( inheritedGroupType == null )
+            {
+                return inheritedRequirements;
+            }
+
+            do
+            {
+                if ( !visitedGroupTypeIds.Add( inheritedGroupType.Id ) )
+                {
+                    break;
+                }
+
+                string inheritedFromUrl = null;
+                if ( urlTemplate.IsNotNullOrWhiteSpace() )
+                {
+                    inheritedFromUrl = urlTemplate.ResolveMergeFields( new Dictionary<string, object>
+                    {
+                        ["Entity"] = inheritedGroupType
+                    } );
+                    inheritedFromUrl = this.RequestContext.ResolveRockUrl( inheritedFromUrl );
+                }
+
+                var ancestorId = inheritedGroupType.Id;
+                var ancestorName = inheritedGroupType.Name;
+
+                inheritedRequirements.AddRange(
+                    groupRequirementService.Queryable()
+                        .AsNoTracking()
+                        .Include( r => r.GroupRequirementType )
+                        .Include( r => r.GroupRole )
+                        .Where( r => r.GroupTypeId.HasValue && r.GroupTypeId.Value == ancestorId )
+                        .ToList()
+                        .Select( r => new InheritedGroupRequirementBag
+                        {
+                            Guid = r.Guid,
+                            Name = r.GroupRequirementType?.Name ?? string.Empty,
+                            GroupRoleName = r.GroupRole?.Name ?? string.Empty,
+                            AppliesToAgeClassification = r.AppliesToAgeClassification,
+                            InheritedFromGroupTypeName = ancestorName,
+                            InheritedFromGroupTypeUrl = inheritedFromUrl
+                        } )
+                        .OrderBy( r => r.Name )
+                        .ToList() );
+
+                inheritedGroupType = inheritedGroupType.InheritedGroupTypeId.HasValue
+                    ? groupTypeService.Get( inheritedGroupType.InheritedGroupTypeId.Value )
+                    : null;
+            } while ( inheritedGroupType != null );
+
+            return inheritedRequirements;
+        }
+
+        /// <summary>
+        /// Builds the GroupRequirementType dropdown options for the
+        /// Section 7 modal. Each entry carries the type's
+        /// <see cref="Model.DueDateType"/> so the modal's Due Date
+        /// conditional well reacts to the selection without a server
+        /// round-trip. Mirrors the canonical pattern at
+        /// <c>GroupTypeDetail.cs:122-130</c>.
+        /// </summary>
+        private List<GroupRequirementTypeBag> BuildGroupRequirementTypeOptions()
+        {
+            return new GroupRequirementTypeService( RockContext ).Queryable()
+                .OrderBy( req => req.Name )
+                .Select( req => new GroupRequirementTypeBag
+                {
+                    Text = req.Name,
+                    Value = req.Guid.ToString(),
+                    DueDateType = req.DueDateType
+                } )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Builds the Group Role dropdown options for the
+        /// Section 7 / 9 / 10 modals. Sourced from
+        /// <c>GroupType.Roles</c> on the immediate group type — no
+        /// inheritance walk, matching WebForms parity at
+        /// <c>GroupDetail.ascx.cs:4337-4344</c>. Returns the role's
+        /// <see cref="GroupTypeRole.Guid"/> as the value to align with
+        /// how WebForms persists the role in <c>TypeQualifier</c>.
+        /// </summary>
+        /// <param name="groupType">The active group type cache.</param>
+        private List<ListItemBag> BuildGroupRoleOptions( GroupTypeCache groupType )
+        {
+            if ( groupType?.Roles == null )
+            {
+                return new List<ListItemBag>();
+            }
+
+            return groupType.Roles
+                .OrderBy( r => r.Order )
+                .ThenBy( r => r.Name )
+                .ToListItemBagList();
+        }
+
+        /// <summary>
+        /// Builds the date-typed group-attribute dropdown options for
+        /// the Section 7 modal's Due Date Attribute conditional well.
+        /// Walks the inherited attribute chain (the GroupType has no
+        /// inherent date attributes; only the inherited member-attribute
+        /// list contains them). Mirrors WebForms parity at
+        /// <c>GroupDetail.ascx.cs:3979-3984</c> using the same
+        /// Date / DateTime field-type filter at
+        /// <c>GroupDetail.ascx.cs:278-289</c>.
+        /// </summary>
+        /// <param name="groupType">The active group type cache.</param>
+        private List<ListItemBag> BuildGroupDateAttributeOptions( GroupTypeCache groupType )
+        {
+            var results = new List<ListItemBag>();
+
+            if ( groupType == null )
+            {
+                return results;
+            }
+
+            var dateFieldTypeIds = new List<int>();
+            var dateFieldTypeId = FieldTypeCache.GetId( Rock.SystemGuid.FieldType.DATE.AsGuid() );
+            var dateTimeFieldTypeId = FieldTypeCache.GetId( Rock.SystemGuid.FieldType.DATE_TIME.AsGuid() );
+
+            if ( dateFieldTypeId.HasValue )
+            {
+                dateFieldTypeIds.Add( dateFieldTypeId.Value );
+            }
+            if ( dateTimeFieldTypeId.HasValue )
+            {
+                dateFieldTypeIds.Add( dateTimeFieldTypeId.Value );
+            }
+
+            if ( !dateFieldTypeIds.Any() )
+            {
+                return results;
+            }
+
+            // Walk the GroupType inheritance chain to gather every
+            // group-scope attribute (qualifier column "GroupTypeId"
+            // on the Group entity type). The Group entity itself does
+            // not own attributes here; every Group attribute is
+            // inherited from one of the ancestors. Matches WebForms
+            // BindInheritedAttributes which collects attributes for the
+            // DueDate dropdown.
+            var attributeService = new AttributeService( RockContext );
+            var groupEntityTypeId = new Model.Group().TypeId;
+            var groupTypeService = new GroupTypeService( RockContext );
+
+            var visitedGroupTypeIds = new HashSet<int>();
+            var inheritedGroupType = groupTypeService.Get( groupType.Id );
+
+            if ( inheritedGroupType == null )
+            {
+                return results;
+            }
+
+            do
+            {
+                if ( !visitedGroupTypeIds.Add( inheritedGroupType.Id ) )
+                {
+                    break;
+                }
+
+                var qualifierValue = inheritedGroupType.Id.ToString();
+
+                results.AddRange(
+                    attributeService.GetByEntityTypeId( groupEntityTypeId, false )
+                        .Where( a =>
+                            a.EntityTypeQualifierColumn.Equals( "GroupTypeId", StringComparison.OrdinalIgnoreCase ) &&
+                            a.EntityTypeQualifierValue.Equals( qualifierValue ) &&
+                            dateFieldTypeIds.Contains( a.FieldTypeId ) )
+                        .OrderBy( a => a.Order )
+                        .ThenBy( a => a.Name )
+                        .Select( a => new ListItemBag
+                        {
+                            Value = a.Guid.ToString(),
+                            Text = a.Name
+                        } )
+                        .ToList() );
+
+                inheritedGroupType = inheritedGroupType.InheritedGroupTypeId.HasValue
+                    ? groupTypeService.Get( inheritedGroupType.InheritedGroupTypeId.Value )
+                    : null;
+            } while ( inheritedGroupType != null );
+
+            return results;
+        }
+
+        /// <summary>
+        /// Builds the SystemCommunication dropdown options for the
+        /// Section 9 Welcome / Exit dropdowns. Returns every
+        /// SystemCommunication regardless of category, mirroring
+        /// WebForms <c>CreateSystemCommunicationDropDownLists</c> at
+        /// <c>GroupDetail.ascx.cs:4291-4313</c> (which feeds both the
+        /// Sync modal and the RSVP reminder dropdown).
+        /// </summary>
+        private List<ListItemBag> BuildSystemCommunicationOptions()
+        {
+            return new SystemCommunicationService( RockContext ).Queryable()
+                .OrderBy( c => c.Title )
+                .Select( c => new ListItemBag
+                {
+                    Value = c.Guid.ToString(),
+                    Text = c.Title
+                } )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Loads the per-group requirements for the supplied entity.
+        /// Returns an empty list for new groups. Mirrors WebForms
+        /// <c>ShowEditDetails</c> hydration at
+        /// <c>GroupDetail.ascx.cs:2066</c> filtered to
+        /// <c>GroupId.HasValue</c>.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        private List<GroupRequirementBag> LoadGroupRequirements( Model.Group entity )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                return new List<GroupRequirementBag>();
+            }
+
+            return new GroupRequirementService( RockContext ).Queryable()
+                .AsNoTracking()
+                .Include( r => r.GroupRequirementType )
+                .Include( r => r.GroupRole )
+                .Include( r => r.AppliesToDataView )
+                .Include( r => r.DueDateAttribute )
+                .Where( r => r.GroupId.HasValue && r.GroupId.Value == entity.Id )
+                .ToList()
+                .Select( r => new GroupRequirementBag
+                {
+                    Guid = r.Guid,
+                    GroupRequirementType = r.GroupRequirementType.ToListItemBag(),
+                    Role = r.GroupRole != null ? new ListItemBag { Value = r.GroupRole.Guid.ToString(), Text = r.GroupRole.Name } : null,
+                    AppliesToAgeClassification = r.AppliesToAgeClassification,
+                    AppliesToDataView = r.AppliesToDataView.ToListItemBag(),
+                    AllowLeadersToOverride = r.AllowLeadersToOverride,
+                    MustMeetRequirementToAddMember = r.MustMeetRequirementToAddMember,
+                    DueDateType = r.GroupRequirementType?.DueDateType ?? Model.DueDateType.Immediate,
+                    DueDateStaticDate = r.DueDateStaticDate?.ToRockDateTimeOffset(),
+                    DueDateAttribute = r.DueDateAttribute != null
+                        ? new ListItemBag { Value = r.DueDateAttribute.Guid.ToString(), Text = r.DueDateAttribute.Name }
+                        : null
+                } )
+                .OrderBy( r => r.GroupRequirementType?.Text )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Loads the per-group sync rows for the supplied entity.
+        /// Returns an empty list for new groups. Mirrors the WebForms
+        /// <c>GroupSyncState</c> hydration at
+        /// <c>GroupDetail.ascx.cs:2006-2017</c>.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        private List<GroupSyncBag> LoadGroupSyncs( Model.Group entity )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                return new List<GroupSyncBag>();
+            }
+
+            return new GroupSyncService( RockContext ).Queryable()
+                .AsNoTracking()
+                .Include( s => s.GroupTypeRole )
+                .Include( s => s.SyncDataView )
+                .Include( s => s.WelcomeSystemCommunication )
+                .Include( s => s.ExitSystemCommunication )
+                .Where( s => s.GroupId == entity.Id )
+                .ToList()
+                .Select( s => new GroupSyncBag
+                {
+                    Guid = s.Guid,
+                    GroupTypeRole = s.GroupTypeRole != null
+                        ? new ListItemBag { Value = s.GroupTypeRole.Guid.ToString(), Text = s.GroupTypeRole.Name }
+                        : null,
+                    SyncDataView = s.SyncDataView.ToListItemBag(),
+                    WelcomeSystemCommunication = s.WelcomeSystemCommunication != null
+                        ? new ListItemBag { Value = s.WelcomeSystemCommunication.Guid.ToString(), Text = s.WelcomeSystemCommunication.Title }
+                        : null,
+                    ExitSystemCommunication = s.ExitSystemCommunication != null
+                        ? new ListItemBag { Value = s.ExitSystemCommunication.Guid.ToString(), Text = s.ExitSystemCommunication.Title }
+                        : null,
+                    AddUserAccountsDuringSync = s.AddUserAccountsDuringSync,
+                    ScheduleIntervalMinutes = s.ScheduleIntervalMinutes,
+                    LastRefreshDateTime = s.LastRefreshDateTime?.ToRockDateTimeOffset()
+                } )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Loads the per-group member workflow triggers for the
+        /// supplied entity. Parses the pipe-delimited 7-tuple
+        /// <c>TypeQualifier</c> into typed bag fields. Mirrors the
+        /// canonical pattern at <c>GroupTypeDetail.cs:1063-1152</c>.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        private List<GroupMemberWorkflowTriggerBag> LoadGroupMemberWorkflowTriggers( Model.Group entity )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                return new List<GroupMemberWorkflowTriggerBag>();
+            }
+
+            var triggers = new GroupMemberWorkflowTriggerService( RockContext ).Queryable()
+                .AsNoTracking()
+                .Include( t => t.WorkflowType )
+                .Where( t => t.GroupId.HasValue && t.GroupId.Value == entity.Id )
+                .OrderBy( t => t.Name )
+                .ToList();
+
+            var bags = new List<GroupMemberWorkflowTriggerBag>( triggers.Count );
+
+            foreach ( var t in triggers )
+            {
+                // {ToStatus}|{ToRoleGuid}|{FromStatus}|{FromRoleGuid}|{TriggerOnFirstAttendance}|{ShowNoteOnPlacement}|{RequireNoteOnPlacement}
+                var parts = ( t.TypeQualifier ?? string.Empty ).Split( '|' );
+
+                var bag = new GroupMemberWorkflowTriggerBag
+                {
+                    Guid = t.Guid,
+                    Name = t.Name,
+                    IsActive = t.IsActive,
+                    WorkflowType = t.WorkflowType?.ToListItemBag(),
+                    TriggerType = t.TriggerType
+                };
+
+                GroupMemberStatus? toStatus = parts.Length > 0
+                    ? ( GroupMemberStatus? ) parts[0].AsIntegerOrNull()
+                    : null;
+
+                Guid? toRoleGuid = parts.Length > 1
+                    ? parts[1].AsGuidOrNull()
+                    : null;
+
+                GroupMemberStatus? fromStatus = parts.Length > 2
+                    ? ( GroupMemberStatus? ) parts[2].AsIntegerOrNull()
+                    : null;
+
+                Guid? fromRoleGuid = parts.Length > 3
+                    ? parts[3].AsGuidOrNull()
+                    : null;
+
+                var triggerOnFirstAttendance = parts.Length > 4 && parts[4].AsBoolean();
+                var showNoteOnPlacement = parts.Length > 5 && parts[5].AsBoolean();
+                var requireNoteOnPlacement = parts.Length > 6 && parts[6].AsBoolean();
+
+                switch ( t.TriggerType )
+                {
+                    case GroupMemberWorkflowTriggerType.MemberAddedToGroup:
+                    case GroupMemberWorkflowTriggerType.MemberRemovedFromGroup:
+                        /*
+                             1/23/2026 - MSE
+
+                             For these trigger types, the UI displays these qualifiers using the label "With Status/ With Role",
+                             However, the persisted qualifier format actually stores these values in the "To" slots (part[0] and part[1]).
+                        */
+                        bag.ToStatus = toStatus;
+                        bag.ToRoleGuid = toRoleGuid;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberStatusChanged:
+                        bag.FromStatus = fromStatus;
+                        bag.ToStatus = toStatus;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberRoleChanged:
+                        bag.FromRoleGuid = fromRoleGuid;
+                        bag.ToRoleGuid = toRoleGuid;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberAttendedGroup:
+                        bag.TriggerOnFirstAttendance = triggerOnFirstAttendance;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberPlacedElsewhere:
+                        bag.ShowNoteOnPlacement = showNoteOnPlacement;
+                        bag.RequireNoteOnPlacement = requireNoteOnPlacement;
+                        break;
+                }
+
+                bags.Add( bag );
+            }
+
+            return bags;
+        }
+
+        /// <summary>
+        /// Serializes a workflow trigger bag back into the pipe-delimited
+        /// 7-tuple <c>TypeQualifier</c> string. Mirrors the canonical
+        /// pattern at <c>GroupTypeDetail.cs:1157</c>. The format is
+        /// load-bearing: WebForms blocks consume the same shape.
+        /// </summary>
+        /// <param name="bag">The trigger bag to serialize.</param>
+        private static string BuildGroupMemberWorkflowTriggerTypeQualifier( GroupMemberWorkflowTriggerBag bag )
+        {
+            // Format:
+            // {ToStatus}|{ToRoleGuid}|{FromStatus}|{FromRoleGuid}|{TriggerOnFirstAttendance}|{ShowNoteOnPlacement}|{RequireNoteOnPlacement}
+            // Even though the UI renders some trigger types as "With Status/Role of", the persisted qualifier format
+            // stores values in the "to" slots (part[0] and part[1]).
+
+            string toStatus = string.Empty;
+            string toRoleGuid = string.Empty;
+            string fromStatus = string.Empty;
+            string fromRoleGuid = string.Empty;
+            bool triggerOnFirstAttendance = false;
+            bool showNoteOnPlacement = false;
+            bool requireNoteOnPlacement = false;
+
+            if ( bag != null )
+            {
+                switch ( bag.TriggerType )
+                {
+                    case GroupMemberWorkflowTriggerType.MemberAddedToGroup:
+                    case GroupMemberWorkflowTriggerType.MemberRemovedFromGroup:
+                        /*
+                             5/11/2026 - MSE
+
+                             For these trigger types, the UI displays these qualifiers using the label "With Status/ With Role",
+                             However, the persisted qualifier format actually stores these values in the "To" slots (part[0] and part[1]).
+                        */
+                        toStatus = bag.ToStatus.HasValue ? ( ( int ) bag.ToStatus.Value ).ToString() : string.Empty;
+                        toRoleGuid = bag.ToRoleGuid?.ToString() ?? string.Empty;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberStatusChanged:
+                        toStatus = bag.ToStatus.HasValue ? ( ( int ) bag.ToStatus.Value ).ToString() : string.Empty;
+                        fromStatus = bag.FromStatus.HasValue ? ( ( int ) bag.FromStatus.Value ).ToString() : string.Empty;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberRoleChanged:
+                        toRoleGuid = bag.ToRoleGuid?.ToString() ?? string.Empty;
+                        fromRoleGuid = bag.FromRoleGuid?.ToString() ?? string.Empty;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberAttendedGroup:
+                        triggerOnFirstAttendance = bag.TriggerOnFirstAttendance;
+                        break;
+
+                    case GroupMemberWorkflowTriggerType.MemberPlacedElsewhere:
+                        showNoteOnPlacement = bag.ShowNoteOnPlacement;
+                        requireNoteOnPlacement = bag.RequireNoteOnPlacement;
+                        break;
+                }
+            }
+
+            return string.Format(
+                "{0}|{1}|{2}|{3}|{4}|{5}|{6}",
+                toStatus,
+                toRoleGuid,
+                fromStatus,
+                fromRoleGuid,
+                triggerOnFirstAttendance,
+                showNoteOnPlacement,
+                requireNoteOnPlacement );
+        }
+
+        /// <summary>
+        /// Checks whether the incoming workflow trigger bags differ
+        /// from the persisted set (additions, deletions, or any field
+        /// change). Used to gate the post-save
+        /// <c>RemoveCachedTriggers()</c> invalidation. Mirrors the
+        /// canonical pattern at <c>GroupTypeDetail.cs:1220-1254</c>.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        /// <param name="incomingBags">The incoming trigger bag list.</param>
+        private bool HaveGroupMemberWorkflowTriggersChanged( Model.Group entity, List<GroupMemberWorkflowTriggerBag> incomingBags )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                // New group: any trigger row is a change.
+                return incomingBags.Any();
+            }
+
+            var existing = new GroupMemberWorkflowTriggerService( RockContext ).Queryable()
+                .AsNoTracking()
+                .Where( t => t.GroupId.HasValue && t.GroupId.Value == entity.Id )
+                .ToList();
+
+            // Deletions.
+            if ( existing.Any( e => !incomingBags.Any( b => b.Guid == e.Guid ) ) )
+            {
+                return true;
+            }
+
+            // Additions / mutations.
+            foreach ( var bag in incomingBags )
+            {
+                var match = existing.FirstOrDefault( e => e.Guid == bag.Guid );
+                if ( match == null )
+                {
+                    return true;
+                }
+
+                if ( match.Name != bag.Name
+                    || match.IsActive != bag.IsActive
+                    || match.WorkflowTypeId != ( bag.WorkflowType?.GetEntityId<WorkflowType>( RockContext ) ?? 0 )
+                    || match.TriggerType != bag.TriggerType
+                    || match.TypeQualifier != BuildGroupMemberWorkflowTriggerTypeQualifier( bag ) )
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Persists the Section 7 group requirements list inside the
+        /// Save block action's <c>WrapTransaction</c> step 4c. Mirrors
+        /// the WebForms deferred-insert pattern at
+        /// <c>GroupDetail.ascx.cs:845-886</c> and
+        /// <c>GroupDetail.ascx.cs:1330-1334</c> but expressed via the
+        /// <see cref="SyncRelatedEntities{TEntity, TBag, TKey}"/>
+        /// helper since the group's Id is already assigned by the
+        /// preceding SaveChanges in the transaction.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        /// <param name="bags">The group requirement bags from the save payload.</param>
+        private void SaveGroupRequirements( Model.Group entity, List<GroupRequirementBag> bags )
+        {
+            var service = new GroupRequirementService( RockContext );
+            var bagList = ( bags ?? new List<GroupRequirementBag>() ).Where( b => b != null ).ToList();
+
+            foreach ( var b in bagList.Where( b => b.Guid == Guid.Empty ) )
+            {
+                b.Guid = Guid.NewGuid();
+            }
+
+            SyncRelatedEntities(
+                service,
+                service.Queryable().Where( r => r.GroupId.HasValue && r.GroupId.Value == entity.Id ),
+                bagList,
+                existingKeySelector: r => r.Guid,
+                incomingKeySelector: b => b.Guid,
+                createNew: b => new GroupRequirement { Guid = b.Guid, GroupId = entity.Id },
+                updateEntity: ( requirement, bag ) =>
+                {
+                    requirement.GroupId = entity.Id;
+                    requirement.GroupRequirementTypeId = bag.GroupRequirementType?.GetEntityId<GroupRequirementType>( RockContext ) ?? 0;
+                    requirement.GroupRoleId = bag.Role?.GetEntityId<GroupTypeRole>( RockContext );
+                    requirement.MustMeetRequirementToAddMember = bag.MustMeetRequirementToAddMember;
+                    requirement.AppliesToAgeClassification = bag.AppliesToAgeClassification;
+                    requirement.AppliesToDataViewId = bag.AppliesToDataView?.GetEntityId<DataView>( RockContext );
+                    requirement.AllowLeadersToOverride = bag.AllowLeadersToOverride;
+
+                    requirement.DueDateStaticDate = null;
+                    requirement.DueDateAttributeId = null;
+
+                    if ( bag.DueDateType == Model.DueDateType.ConfiguredDate )
+                    {
+                        requirement.DueDateStaticDate = bag.DueDateStaticDate?.DateTime;
+                    }
+                    else if ( bag.DueDateType == Model.DueDateType.GroupAttribute )
+                    {
+                        requirement.DueDateAttributeId = bag.DueDateAttribute?.GetEntityId<Rock.Model.Attribute>( RockContext );
+                    }
+                } );
+        }
+
+        /// <summary>
+        /// Persists the Section 9 group sync rows inside the Save block
+        /// action's <c>WrapTransaction</c> step 4d. Mirrors WebForms
+        /// <c>btnSave_Click</c> body at
+        /// <c>GroupDetail.ascx.cs:861-867</c> (removal) and
+        /// <c>GroupDetail.ascx.cs:1011-1022</c> (add/update).
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        /// <param name="bags">The group sync bags from the save payload.</param>
+        private void SaveGroupSyncs( Model.Group entity, List<GroupSyncBag> bags )
+        {
+            var service = new GroupSyncService( RockContext );
+            var bagList = ( bags ?? new List<GroupSyncBag>() ).Where( b => b != null ).ToList();
+
+            foreach ( var b in bagList.Where( b => b.Guid == Guid.Empty ) )
+            {
+                b.Guid = Guid.NewGuid();
+            }
+
+            SyncRelatedEntities(
+                service,
+                service.Queryable().Where( s => s.GroupId == entity.Id ),
+                bagList,
+                existingKeySelector: s => s.Guid,
+                incomingKeySelector: b => b.Guid,
+                createNew: b => new GroupSync { Guid = b.Guid, GroupId = entity.Id },
+                updateEntity: ( sync, bag ) =>
+                {
+                    sync.GroupId = entity.Id;
+                    sync.GroupTypeRoleId = bag.GroupTypeRole?.GetEntityId<GroupTypeRole>( RockContext ) ?? 0;
+                    sync.SyncDataViewId = bag.SyncDataView?.GetEntityId<DataView>( RockContext ) ?? 0;
+                    sync.WelcomeSystemCommunicationId = bag.WelcomeSystemCommunication?.GetEntityId<SystemCommunication>( RockContext );
+                    sync.ExitSystemCommunicationId = bag.ExitSystemCommunication?.GetEntityId<SystemCommunication>( RockContext );
+                    sync.AddUserAccountsDuringSync = bag.AddUserAccountsDuringSync;
+                    sync.ScheduleIntervalMinutes = bag.ScheduleIntervalMinutes;
+                    // LastRefreshDateTime is owned by the sync job; do
+                    // not overwrite from the UI bag.
+                } );
+        }
+
+        /// <summary>
+        /// Persists the Section 10 group member workflow triggers
+        /// inside the Save block action's <c>WrapTransaction</c> step
+        /// 4e. Returns true when any add / update / delete occurred so
+        /// the post-transaction
+        /// <c>GroupMemberWorkflowTriggerService.RemoveCachedTriggers()</c>
+        /// invalidation fires. Mirrors WebForms parity at
+        /// <c>GroupDetail.ascx.cs:853-858, 1024-1041, 1427-1430</c>.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        /// <param name="bags">The trigger bags from the save payload.</param>
+        private bool SaveGroupMemberWorkflowTriggers( Model.Group entity, List<GroupMemberWorkflowTriggerBag> bags )
+        {
+            var service = new GroupMemberWorkflowTriggerService( RockContext );
+            var bagList = ( bags ?? new List<GroupMemberWorkflowTriggerBag>() ).Where( b => b != null ).ToList();
+
+            foreach ( var b in bagList.Where( b => b.Guid == Guid.Empty ) )
+            {
+                b.Guid = Guid.NewGuid();
+            }
+
+            if ( !HaveGroupMemberWorkflowTriggersChanged( entity, bagList ) )
+            {
+                return false;
+            }
+
+            SyncRelatedEntities(
+                service,
+                service.Queryable().Where( t => t.GroupId.HasValue && t.GroupId.Value == entity.Id ),
+                bagList,
+                existingKeySelector: t => t.Guid,
+                incomingKeySelector: b => b.Guid,
+                createNew: b => new GroupMemberWorkflowTrigger { Guid = b.Guid, GroupId = entity.Id },
+                updateEntity: ( trigger, bag ) =>
+                {
+                    trigger.GroupId = entity.Id;
+                    trigger.Name = bag.Name;
+                    trigger.IsActive = bag.IsActive;
+                    trigger.WorkflowTypeId = bag.WorkflowType?.GetEntityId<WorkflowType>( RockContext ) ?? 0;
+                    trigger.TriggerType = bag.TriggerType;
+                    trigger.TypeQualifier = BuildGroupMemberWorkflowTriggerTypeQualifier( bag );
+                } );
+
+            return true;
         }
 
         /// <summary>

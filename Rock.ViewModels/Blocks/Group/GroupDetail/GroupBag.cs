@@ -608,5 +608,49 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public List<PublicEditableAttributeBag> GroupMemberAttributes { get; set; }
 
         #endregion
+
+        #region Section 7 (Group Requirements)
+
+        /// <summary>
+        /// Gets or sets the per-group requirements rendered in the
+        /// editable "Specific Group Requirements" grid. The read-only
+        /// "From Group Type" grid is sourced from
+        /// <c>GroupTypeOptionsBag.GroupTypeRequirements</c> instead.
+        /// Persisted by the Save action's step 4c using the
+        /// <c>SyncRelatedEntities</c> pattern; new entries land in the
+        /// queue and are <c>AddRange</c>'d after the group's Id is
+        /// assigned (deferred-insert per
+        /// <c>webforms/23-validations-and-cascades.md</c>).
+        /// </summary>
+        public List<GroupRequirementBag> GroupRequirements { get; set; }
+
+        #endregion
+
+        #region Section 9 (Group Sync)
+
+        /// <summary>
+        /// Gets or sets the per-group sync rules rendered in the
+        /// Section 9 grid. Persisted by the Save action's step 4d using
+        /// the <c>SyncRelatedEntities</c> pattern. Each entry maps a
+        /// DataView to a role with a sync interval and optional
+        /// welcome / exit communications.
+        /// </summary>
+        public List<GroupSyncBag> GroupSyncs { get; set; }
+
+        #endregion
+
+        #region Section 10 (Group Member Workflow Triggers)
+
+        /// <summary>
+        /// Gets or sets the per-group member workflow triggers rendered
+        /// in the Section 10 grid. Persisted by the Save action's step
+        /// 4e using the <c>SyncRelatedEntities</c> pattern. The
+        /// <c>TypeQualifier</c> 7-tuple is built server-side from each
+        /// bag's typed qualifier fields; the Vue layer never touches
+        /// the raw qualifier string.
+        /// </summary>
+        public List<GroupMemberWorkflowTriggerBag> GroupMemberWorkflowTriggers { get; set; }
+
+        #endregion
     }
 }

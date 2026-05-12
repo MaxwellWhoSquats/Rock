@@ -299,5 +299,116 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public List<GroupMemberInheritedAttributeBag> InheritedMemberAttributes { get; set; }
 
         #endregion
+
+        #region Section 6 / 7 / 9 / 10 visibility flags (Phase 5 additions)
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the group type
+        /// permits per-group attribute definitions for members. Drives
+        /// the Section 6 panel-visibility gate (along with the per-user
+        /// ADMINISTRATE flag on the group bag) per WebForms parity at
+        /// <c>GroupDetail.ascx.cs:2001-2004</c>. Mirrors
+        /// <c>GroupType.AllowSpecificGroupMemberAttributes</c>.
+        /// </summary>
+        public bool AllowSpecificGroupMemberAttributes { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the group type
+        /// permits per-group group requirements. Drives the Section 7
+        /// "Specific Group Requirements" Add-button visibility plus the
+        /// editable-grid wrapper visibility per WebForms parity at
+        /// <c>GroupDetail.ascx.cs:4554</c>. Mirrors
+        /// <c>GroupType.EnableSpecificGroupRequirements</c>.
+        /// </summary>
+        public bool EnableSpecificGroupRequirements { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the group type
+        /// permits group sync rules. Drives the Section 9 panel
+        /// visibility (combined with ADMINISTRATE on the group bag and
+        /// the presence of any existing syncs).
+        /// <para>
+        /// Mirrors <c>GroupType.AllowGroupSync</c>. The corresponding
+        /// WebForms gate at <c>GroupDetail.ascx.cs:2195</c> uses
+        /// ADMINISTRATE on the <em>GroupType</em>, with a sticky
+        /// override at <c>:2002</c> that keeps the panel visible for an
+        /// existing group when the user has ADMINISTRATE on the
+        /// <em>Group</em>. The Obsidian impl simplifies both into a
+        /// single ADMINISTRATE-on-the-Group check on the group bag,
+        /// which is the dominant code path under standard Rock auth
+        /// (Group auth inherits from GroupType) and avoids the
+        /// ViewState stickiness that has no analog here.
+        /// </para>
+        /// </summary>
+        public bool AllowGroupSync { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the group type
+        /// permits per-group member workflow triggers. Drives the
+        /// Section 10 panel visibility (combined with the presence of
+        /// any legacy triggers) per WebForms parity at
+        /// <c>GroupDetail.ascx.cs:2198</c>. Mirrors
+        /// <c>GroupType.AllowSpecificGroupMemberWorkflows</c>.
+        /// </summary>
+        public bool AllowSpecificGroupMemberWorkflows { get; set; }
+
+        #endregion
+
+        #region Section 7 — Inherited Group Requirements (read-only grid)
+
+        /// <summary>
+        /// Gets or sets the read-only inherited group-requirement rows
+        /// for the current group type. Walks the
+        /// <c>InheritedGroupTypeId</c> chain, mirroring the inheritance
+        /// pattern used by <c>InheritedMemberAttributes</c> on
+        /// <see cref="GroupBag"/>. Each row carries its own
+        /// <c>InheritedFromGroupTypeName</c> / <c>InheritedFromGroupTypeUrl</c>
+        /// so the grid can render per-row "(Inherited from {link})"
+        /// cells. Empty when no ancestor group type defines a
+        /// requirement.
+        /// </summary>
+        public List<InheritedGroupRequirementBag> InheritedGroupRequirements { get; set; }
+
+        #endregion
+
+        #region Section 7 / 9 / 10 dropdown sources
+
+        /// <summary>
+        /// Gets or sets the group requirement type dropdown options for
+        /// the Section 7 modal. Each entry carries the type's
+        /// <see cref="Rock.Model.DueDateType"/> so the modal's DueDate
+        /// conditional well reacts to the selection without an extra
+        /// round-trip.
+        /// </summary>
+        public List<GroupRequirementTypeBag> GroupRequirementTypeOptions { get; set; }
+
+        /// <summary>
+        /// Gets or sets the group role dropdown options for the
+        /// Section 7 / 9 / 10 modals. <c>ListItemBag.value</c> is the
+        /// GroupTypeRole Guid; <c>ListItemBag.text</c> is the role name.
+        /// Sourced from <c>GroupType.Roles</c> on the active group type
+        /// (no inheritance walk per WebForms parity).
+        /// </summary>
+        public List<ListItemBag> GroupRoleOptions { get; set; }
+
+        /// <summary>
+        /// Gets or sets the date-typed group attribute dropdown options
+        /// for the Section 7 modal's Due Date Attribute conditional
+        /// well. <c>ListItemBag.value</c> is the Attribute Guid. Sourced
+        /// from the inherited attribute chain filtered to
+        /// Date / DateTime field types.
+        /// </summary>
+        public List<ListItemBag> GroupAttributeOptions { get; set; }
+
+        /// <summary>
+        /// Gets or sets the system communication dropdown options for
+        /// the Section 9 Welcome / Exit dropdowns.
+        /// <c>ListItemBag.value</c> is the SystemCommunication Guid;
+        /// <c>ListItemBag.text</c> is the communication title. Drives
+        /// both Welcome and Exit dropdowns in the Sync modal.
+        /// </summary>
+        public List<ListItemBag> SystemCommunicationOptions { get; set; }
+
+        #endregion
     }
 }

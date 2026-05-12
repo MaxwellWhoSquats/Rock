@@ -325,15 +325,22 @@
         <!-- ========================== -->
         <!-- Section 6 - Group Member Attribute Definitions -->
         <!-- ========================== -->
-        <ContentSection title="Group Member Attributes"
+        <ContentSection v-if="canAdministrate && (groupTypeOptions.allowSpecificGroupMemberAttributes || inheritedMemberAttributes.length > 0 || groupMemberAttributes.length > 0)"
+                        title="Group Member Attributes"
                         description="Per-group attribute definitions used by every member.">
             <GroupMemberAttributes v-model:groupMemberAttributes="groupMemberAttributes"
                                    :inheritedGroupMemberAttributes="inheritedMemberAttributes" />
         </ContentSection>
 
-        <ContentSection title="Group Requirements" description="Requirements every member must meet.">
-            <NotificationBox alertType="info">Coming in Phase 5.</NotificationBox>
-        </ContentSection>
+        <!-- ========================== -->
+        <!-- Section 7 - Group Requirements -->
+        <!-- ========================== -->
+        <GroupRequirements v-model:groupRequirements="groupRequirements"
+                           :inheritedGroupRequirements="groupTypeOptions.inheritedGroupRequirements ?? []"
+                           :groupRequirementTypeOptions="groupTypeOptions.groupRequirementTypeOptions ?? []"
+                           :groupRoleOptions="groupTypeOptions.groupRoleOptions ?? []"
+                           :groupAttributeOptions="groupTypeOptions.groupAttributeOptions ?? []"
+                           :enableSpecificGroupRequirements="groupTypeOptions.enableSpecificGroupRequirements" />
 
         <!-- ========================== -->
         <!-- Section 8 - Chat -->
@@ -371,15 +378,20 @@
         </ContentSection>
 
         <!-- ========================== -->
-        <!-- Sections 9 / 10 - placeholders -->
+        <!-- Section 9 - Group Sync Settings -->
         <!-- ========================== -->
-        <ContentSection title="Group Sync" description="Automatic membership sync from a Data View.">
-            <NotificationBox alertType="info">Coming in Phase 5.</NotificationBox>
-        </ContentSection>
+        <GroupSync v-model:groupSyncs="groupSyncs"
+                   :groupRoleOptions="groupTypeOptions.groupRoleOptions ?? []"
+                   :systemCommunicationOptions="groupTypeOptions.systemCommunicationOptions ?? []"
+                   :canAdministrate="canAdministrate"
+                   :allowGroupSync="groupTypeOptions.allowGroupSync" />
 
-        <ContentSection title="Group Member Workflows" description="Workflows triggered by member events.">
-            <NotificationBox alertType="info">Coming in Phase 5.</NotificationBox>
-        </ContentSection>
+        <!-- ========================== -->
+        <!-- Section 10 - Group Member Workflows -->
+        <!-- ========================== -->
+        <GroupMemberWorkflows v-model:groupMemberWorkflowTriggers="groupMemberWorkflowTriggers"
+                                     :groupRoleOptions="groupTypeOptions.groupRoleOptions ?? []"
+                                     :allowSpecificGroupMemberWorkflows="groupTypeOptions.allowSpecificGroupMemberWorkflows" />
     </fieldset>
 </template>
 
@@ -404,6 +416,9 @@
     import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
     import { GroupTypeOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag";
     import { GroupMemberInheritedAttributeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberInheritedAttributeBag";
+    import { GroupMemberWorkflowTriggerBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberWorkflowTriggerBag";
+    import { GroupRequirementBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupRequirementBag";
+    import { GroupSyncBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupSyncBag";
     import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
     import { ValidPropertiesBox } from "@Obsidian/ViewModels/Utility/validPropertiesBox";
     import { setPropertiesBoxValue, watchPropertyChanges } from "@Obsidian/Utility/block";
@@ -415,6 +430,9 @@
     import ConditionalWell from "@Obsidian/Controls/conditionalWell.obs";
     import AttributeValuesContainer from "@Obsidian/Controls/attributeValuesContainer.obs";
     import GroupMemberAttributes from "./groupMemberAttributes.partial.obs";
+    import GroupRequirements from "./groupRequirements.partial.obs";
+    import GroupSync from "./groupSync.partial.obs";
+    import GroupMemberWorkflows from "./groupMemberWorkflows.partial.obs";
     import TextBox from "@Obsidian/Controls/textBox.obs";
     import CheckBox from "@Obsidian/Controls/checkBox.obs";
     import CheckBoxList from "@Obsidian/Controls/checkBoxList.obs";
@@ -485,6 +503,7 @@
     const isLimitedToSecurityRoleGroups = computed((): boolean => bag.value.isLimitedToSecurityRoleGroups === true);
     const hasChildGroups = computed((): boolean => bag.value.hasChildGroups === true);
     const isSystem = computed((): boolean => bag.value.isSystem === true);
+    const canAdministrate = computed((): boolean => bag.value.canAdministrate === true);
 
     const showAdvancedRelationshipSettings = ref(
         (props.modelValue.bag?.leaderToLeaderRelationshipMultiplierOverride ?? null) !== null
@@ -540,6 +559,9 @@
     const chatPushNotificationModeOverride = propertyRef<ChatNotificationMode | null>(props.modelValue.bag?.chatPushNotificationModeOverride ?? null, "ChatPushNotificationModeOverride");
     const chatChannelAvatarBinaryFile = propertyRef<ListItemBag | null>(props.modelValue.bag?.chatChannelAvatarBinaryFile ?? null, "ChatChannelAvatarBinaryFile");
     const groupMemberAttributes = propertyRef<PublicEditableAttributeBag[]>(props.modelValue.bag?.groupMemberAttributes ?? [], "GroupMemberAttributes");
+    const groupRequirements = propertyRef<GroupRequirementBag[]>(props.modelValue.bag?.groupRequirements ?? [], "GroupRequirements");
+    const groupSyncs = propertyRef<GroupSyncBag[]>(props.modelValue.bag?.groupSyncs ?? [], "GroupSyncs");
+    const groupMemberWorkflowTriggers = propertyRef<GroupMemberWorkflowTriggerBag[]>(props.modelValue.bag?.groupMemberWorkflowTriggers ?? [], "GroupMemberWorkflowTriggers");
 
     // The properties that are being edited. This should only contain
     // objects returned by propertyRef().
@@ -554,7 +576,7 @@
         scheduleConfirmationLogic, scheduleCoordinatorPerson, scheduleCoordinatorNotificationTypes, attendanceRecordRequiredForCheckIn,
         isChatEnabledOverride, isLeavingChatChannelAllowedOverride, isChatChannelPublicOverride,
         isChatChannelAlwaysShownOverride, chatPushNotificationModeOverride, chatChannelAvatarBinaryFile,
-        groupMemberAttributes];
+        groupMemberAttributes, groupRequirements, groupSyncs, groupMemberWorkflowTriggers];
 
     // #endregion
 
@@ -891,6 +913,11 @@
 
         // Section 5 + 6 — Attributes.
         updateRefValue(groupMemberAttributes, props.modelValue.bag?.groupMemberAttributes ?? []);
+
+        // Section 7 / 9 / 10 — Phase 5 list payloads.
+        updateRefValue(groupRequirements, props.modelValue.bag?.groupRequirements ?? []);
+        updateRefValue(groupSyncs, props.modelValue.bag?.groupSyncs ?? []);
+        updateRefValue(groupMemberWorkflowTriggers, props.modelValue.bag?.groupMemberWorkflowTriggers ?? []);
     });
 
     // Outbound: emit a fresh ValidPropertiesBox when any tracked
@@ -963,6 +990,11 @@
         // Section 5 + 6 — Attributes.
         setPropertiesBoxValue(newValue, "attributeValues", attributeValues.value);
         setPropertiesBoxValue(newValue, "groupMemberAttributes", groupMemberAttributes.value);
+
+        // Section 7 / 9 / 10 — Phase 5 list payloads.
+        setPropertiesBoxValue(newValue, "groupRequirements", groupRequirements.value);
+        setPropertiesBoxValue(newValue, "groupSyncs", groupSyncs.value);
+        setPropertiesBoxValue(newValue, "groupMemberWorkflowTriggers", groupMemberWorkflowTriggers.value);
 
         emit("update:modelValue", newValue);
     });

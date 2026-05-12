@@ -16,8 +16,11 @@
 //
 
 import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
+import { TimeIntervalUnit } from "@Obsidian/Enums/Core/timeIntervalUnit";
 import { FieldType } from "@Obsidian/SystemGuids/fieldType";
+import { isNullish } from "@Obsidian/Utility/util";
 import { TimePickerValue } from "@Obsidian/ViewModels/Controls/timePickerValue";
+import { TimeIntervalBag } from "@Obsidian/ViewModels/Utility/timeIntervalBag";
 import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
 
 /**
@@ -149,6 +152,85 @@ export function formatTimeValue(value: TimePickerValue): string | null {
     const hh = value.hour.toString().padStart(2, "0");
     const mm = value.minute.toString().padStart(2, "0");
     return `${hh}:${mm}:00`;
+}
+
+/**
+ * Converts a minute count into a TimeIntervalBag using the largest whole
+ * unit (days, hours, or minutes). Mirrors the sibling implementation at
+ * Rock.JavaScript.Obsidian.Blocks/src/Cms/PersonalizationSegmentDetail/utilities.partial.ts
+ * so the two blocks share identical interval-conversion semantics.
+ *
+ * @param minutes The number of minutes to convert.
+ * @returns A TimeIntervalBag representing the interval.
+ */
+export function minutesToIntervalBag(minutes: number): TimeIntervalBag {
+    if (minutes <= 0) {
+        return { unit: TimeIntervalUnit.Days, value: 1 };
+    }
+
+    let value = minutes;
+    let unit;
+
+    if (minutes % 1440 === 0) {
+        value = minutes / 1440;
+        unit = TimeIntervalUnit.Days;
+    }
+    else if (minutes % 60 === 0) {
+        value = minutes / 60;
+        unit = TimeIntervalUnit.Hours;
+    }
+    else {
+        value = minutes;
+        unit = TimeIntervalUnit.Minutes;
+    }
+
+    return { unit, value };
+}
+
+/**
+ * Converts a TimeIntervalBag back into a minute count. Mirrors the sibling
+ * implementation at PersonalizationSegmentDetail/utilities.partial.ts.
+ *
+ * @param bag The interval bag to convert.
+ * @returns The number of minutes represented by the bag.
+ */
+export function intervalBagToMinutes(bag: TimeIntervalBag | null): number {
+    if (isNullish(bag) || isNullish(bag.value)) {
+        return 0;
+    }
+
+    const value = bag.value;
+
+    switch (bag.unit) {
+        case TimeIntervalUnit.Days:
+            return value * 1440;
+        case TimeIntervalUnit.Hours:
+            return value * 60;
+        case TimeIntervalUnit.Minutes:
+            return value;
+        default:
+            return 1440;
+    }
+}
+
+/**
+ * Formats a raw minute count as a human-readable string ("5 minutes",
+ * "2 hours", "1 day"). Picks the largest unit that divides cleanly.
+ * Returns an empty string for null / undefined input.
+ */
+export function formatScheduleInterval(minutes: number | null | undefined): string {
+    if (minutes == null) {
+        return "";
+    }
+    if (minutes % 1440 === 0) {
+        const days = minutes / 1440;
+        return `${days} ${days === 1 ? "day" : "days"}`;
+    }
+    if (minutes % 60 === 0) {
+        const hours = minutes / 60;
+        return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+    }
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
 /**

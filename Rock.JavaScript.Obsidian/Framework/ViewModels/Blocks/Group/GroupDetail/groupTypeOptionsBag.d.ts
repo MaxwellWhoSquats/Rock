@@ -26,6 +26,8 @@ import { RelationshipStrength } from "@Obsidian/Enums/Group/relationshipStrength
 import { ScheduleType } from "@Obsidian/Enums/Group/scheduleType";
 import { Guid } from "@Obsidian/Types";
 import { GroupMemberInheritedAttributeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberInheritedAttributeBag";
+import { GroupRequirementTypeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupRequirementTypeBag";
+import { InheritedGroupRequirementBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/inheritedGroupRequirementBag";
 import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 
 /**
@@ -270,4 +272,65 @@ export type GroupTypeOptionsBag = {
      * configure a status defined type.
      */
     statusValues?: ListItemBag[] | null;
+
+    /**
+     * Gets or sets a value indicating whether the group type
+     * permits per-group attribute definitions for members. Drives
+     * the Section 6 panel-visibility gate per WebForms parity.
+     */
+    allowSpecificGroupMemberAttributes: boolean;
+
+    /**
+     * Gets or sets a value indicating whether the group type
+     * permits per-group group requirements. Drives the Section 7
+     * "Specific Group Requirements" Add-button visibility.
+     */
+    enableSpecificGroupRequirements: boolean;
+
+    /**
+     * Gets or sets a value indicating whether the group type
+     * permits group sync rules. Drives the Section 9 panel
+     * visibility per WebForms parity.
+     */
+    allowGroupSync: boolean;
+
+    /**
+     * Gets or sets a value indicating whether the group type
+     * permits per-group member workflow triggers. Drives the
+     * Section 10 panel visibility per WebForms parity.
+     */
+    allowSpecificGroupMemberWorkflows: boolean;
+
+    /**
+     * Gets or sets the read-only inherited group-requirement rows
+     * for the current group type. Each row carries its own
+     * inheritedFromGroupTypeName / inheritedFromGroupTypeUrl so
+     * the grid can render per-row "(Inherited from {link})" cells.
+     */
+    inheritedGroupRequirements?: InheritedGroupRequirementBag[] | null;
+
+    /**
+     * Gets or sets the GroupRequirementType dropdown options for
+     * the Section 7 modal.
+     */
+    groupRequirementTypeOptions?: GroupRequirementTypeBag[] | null;
+
+    /**
+     * Gets or sets the Group Role dropdown options for the
+     * Section 7 / 9 / 10 modals.
+     */
+    groupRoleOptions?: ListItemBag[] | null;
+
+    /**
+     * Gets or sets the date-typed group-attribute dropdown options
+     * for the Section 7 modal's Due Date Attribute conditional
+     * well.
+     */
+    groupAttributeOptions?: ListItemBag[] | null;
+
+    /**
+     * Gets or sets the system communication dropdown options for
+     * the Section 9 Welcome / Exit dropdowns.
+     */
+    systemCommunicationOptions?: ListItemBag[] | null;
 };

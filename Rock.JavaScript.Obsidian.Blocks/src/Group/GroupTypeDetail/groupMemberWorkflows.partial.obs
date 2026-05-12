@@ -98,6 +98,7 @@
     import WorkflowTypePicker from "@Obsidian/Controls/workflowTypePicker.obs";
     import DropDownList from "@Obsidian/Controls/dropDownList.obs";
     import { enumToListItemBag } from "@Obsidian/Utility/enumUtils";
+    import { escapeHtml } from "@Obsidian/Utility/stringUtils";
     import ConditionalWell from "@Obsidian/Controls/conditionalWell.obs";
     import { GroupMemberStatus, GroupMemberStatusDescription } from "@Obsidian/Enums/Group/groupMemberStatus";
     import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
@@ -241,11 +242,12 @@
         if (trigger.toRoleGuid) {
             const role = props.groupRoleOptions.find(r => r.value?.toUpperCase() === trigger.toRoleGuid?.toUpperCase());
             if (role) {
+                const roleText = escapeHtml(role.text ?? "");
                 if (trigger.triggerType === GroupMemberWorkflowTriggerType.MemberRoleChanged) {
-                    qualifiers.push(` to role of <strong>${role.text}</strong>`);
+                    qualifiers.push(` to role of <strong>${roleText}</strong>`);
                 }
                 else {
-                    qualifiers.push(` with role of <strong>${role.text}</strong>`);
+                    qualifiers.push(` with role of <strong>${roleText}</strong>`);
                 }
             }
         }
@@ -254,7 +256,7 @@
         if (trigger.fromRoleGuid) {
             const role = props.groupRoleOptions.find(r => r.value?.toUpperCase() === trigger.fromRoleGuid?.toUpperCase());
             if (role) {
-                qualifiers.push(` from role of <strong>${role.text}</strong>`);
+                qualifiers.push(` from role of <strong>${escapeHtml(role.text ?? "")}</strong>`);
             }
         }
 

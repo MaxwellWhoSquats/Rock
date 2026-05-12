@@ -1,0 +1,268 @@
+<!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
+<template>
+    <ContentSection v-if="isSectionVisible"
+                    title="Group Sync Settings"
+                    description="Define the rules used to sync group members from data views into this group.">
+        <ContentStack headerLocation="top">
+            <Grid :data="gridData"
+                  keyField="guid"
+                  itemTerm="Group Sync Rule"
+                  liveUpdates
+                  light
+                  @addItem="onAdd">
+                <TextColumn name="role" field="role" title="Role Name" />
+                <TextColumn name="dataView" field="dataView" title="Data View" />
+                <TextColumn name="interval" field="interval" title="Sync Interval" />
+                <DateTimeColumn name="lastSync" field="lastSync" title="Last Sync" />
+                <EditColumn @click="onEdit" />
+                <DeleteColumn @click="onDelete" />
+            </Grid>
+        </ContentStack>
+    </ContentSection>
+
+    <Modal v-model="isModalVisible"
+           title="Group Sync Settings"
+           saveText="Save"
+           cancelText="Cancel"
+           :onSave="onSave">
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">
+            {{ errorMessage }}
+        </NotificationBox>
+
+        <DataViewPicker label="Sync Data View"
+                        v-model="theGroupSync.syncDataView"
+                        :entityTypeGuid="EntityType.Person"
+                        rules="required"
+                        help="Select the Data View for the sync." />
+
+        <DropDownList label="Group Role to Assign"
+                      v-model="groupTypeRoleValue"
+                      :items="availableRoleItems"
+                      rules="required"
+                      help="Select the role to assign the members added by the selected Data View." />
+
+        <IntervalPicker label="Sync Interval"
+                        v-model="syncIntervalValue"
+                        unitPlacement="above"
+                        help="Controls how often the group should sync to the Data View. It will never be less than the Group Sync job execution interval." />
+
+        <DropDownList label="Welcome Communication"
+                      v-model="welcomeCommunicationValue"
+                      :items="systemCommunicationItems"
+                      showBlankItem />
+
+        <DropDownList label="Exit Communication"
+                      v-model="exitCommunicationValue"
+                      :items="systemCommunicationItems"
+                      showBlankItem />
+
+        <InlineCheckBox label="Create Login During Sync"
+                        v-model="theGroupSync.addUserAccountsDuringSync"
+                        help="If the individual does not have a login, should one be created during the sync process?" />
+    </Modal>
+</template>
+
+<script setup lang="ts">
+    import { computed, PropType, ref } from "vue";
+    import Grid, { TextColumn, DateTimeColumn, EditColumn, DeleteColumn } from "@Obsidian/Controls/grid";
+    import Modal from "@Obsidian/Controls/modal.obs";
+    import ContentSection from "@Obsidian/Controls/contentSection.obs";
+    import ContentStack from "@Obsidian/Controls/contentStack.obs";
+    import DropDownList from "@Obsidian/Controls/dropDownList.obs";
+    import InlineCheckBox from "@Obsidian/Controls/inlineCheckBox.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import DataViewPicker from "@Obsidian/Controls/dataViewPicker.obs";
+    import IntervalPicker from "@Obsidian/Controls/intervalPicker.obs";
+    import { EntityType } from "@Obsidian/SystemGuids/entityType";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { TimeIntervalBag } from "@Obsidian/ViewModels/Utility/timeIntervalBag";
+    import { newGuid } from "@Obsidian/Utility/guid";
+    import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { GroupSyncBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupSyncBag";
+    import { formatScheduleInterval, intervalBagToMinutes, minutesToIntervalBag } from "./utils.partial";
+
+    const props = defineProps({
+        groupSyncs: {
+            type: Array as PropType<GroupSyncBag[] | null>,
+            required: true
+        },
+        groupRoleOptions: {
+            type: Array as PropType<ListItemBag[] | null>,
+            default: () => [] as ListItemBag[]
+        },
+        systemCommunicationOptions: {
+            type: Array as PropType<ListItemBag[] | null>,
+            default: () => [] as ListItemBag[]
+        },
+        canAdministrate: {
+            type: Boolean,
+            default: false
+        },
+        allowGroupSync: {
+            type: Boolean,
+            default: false
+        }
+    });
+
+    const emit = defineEmits<{
+        (e: "update:groupSyncs", value: GroupSyncBag[]): void
+    }>();
+
+    // #region Values
+
+    const theGroupSync = ref<GroupSyncBag>(createNewGroupSync());
+    const isModalVisible = ref(false);
+    const errorMessage = ref<string | null>(null);
+
+    // #endregion
+
+    // #region Computed Values
+
+    const syncs = computed({
+        get(): GroupSyncBag[] {
+            return props.groupSyncs ?? [];
+        },
+        set(value: GroupSyncBag[]) {
+            emit("update:groupSyncs", value);
+        }
+    });
+
+    /*
+     * Section 9 visibility mirrors WebForms GroupDetail.ascx.cs:2002 + 2195:
+     *   canAdministrate AND (GroupType.AllowGroupSync OR any existing syncs)
+     */
+    const isSectionVisible = computed<boolean>(() => {
+        return props.canAdministrate
+            && (props.allowGroupSync || syncs.value.length > 0);
+    });
+
+    const gridData = computed(() => {
+        return {
+            rows: syncs.value.map(s => ({
+                guid: s.guid,
+                role: s.groupTypeRole?.text ?? "",
+                dataView: s.syncDataView?.text ?? "",
+                interval: formatScheduleInterval(s.scheduleIntervalMinutes),
+                lastSync: s.lastRefreshDateTime
+            }))
+        };
+    });
+
+    /*
+     * Exclude roles already mapped by another sync rule, except the
+     * one currently being edited. Mirrors WebForms
+     * CreateRoleDropDownList at GroupDetail.ascx.cs:4320-4351.
+     */
+    const availableRoleItems = computed((): ListItemBag[] => {
+        const roleOptions = props.groupRoleOptions ?? [];
+        const editingGuid = theGroupSync.value.guid;
+        const usedRoleGuids = new Set(
+            syncs.value
+                .filter(s => s.guid !== editingGuid)
+                .map(s => s.groupTypeRole?.value)
+                .filter((v): v is string => !!v));
+
+        return roleOptions.filter(r => !r.value || !usedRoleGuids.has(r.value));
+    });
+
+    const systemCommunicationItems = computed((): ListItemBag[] => props.systemCommunicationOptions ?? []);
+
+    const groupTypeRoleValue = computed({
+        get(): string {
+            return theGroupSync.value.groupTypeRole?.value ?? "";
+        },
+        set(value: string) {
+            const selected = (props.groupRoleOptions ?? []).find(o => o.value === value);
+            theGroupSync.value.groupTypeRole = selected ? selected : null;
+        }
+    });
+
+    const syncIntervalValue = computed<TimeIntervalBag>({
+        get(): TimeIntervalBag {
+            return minutesToIntervalBag(theGroupSync.value.scheduleIntervalMinutes ?? 720);
+        },
+        set(value: TimeIntervalBag) {
+            theGroupSync.value.scheduleIntervalMinutes = intervalBagToMinutes(value);
+        }
+    });
+
+    const welcomeCommunicationValue = computed({
+        get(): string {
+            return theGroupSync.value.welcomeSystemCommunication?.value ?? "";
+        },
+        set(value: string) {
+            const selected = (props.systemCommunicationOptions ?? []).find(o => o.value === value);
+            theGroupSync.value.welcomeSystemCommunication = selected ? selected : null;
+        }
+    });
+
+    const exitCommunicationValue = computed({
+        get(): string {
+            return theGroupSync.value.exitSystemCommunication?.value ?? "";
+        },
+        set(value: string) {
+            const selected = (props.systemCommunicationOptions ?? []).find(o => o.value === value);
+            theGroupSync.value.exitSystemCommunication = selected ? selected : null;
+        }
+    });
+
+    // #endregion
+
+    // #region Functions
+
+    function createNewGroupSync(): GroupSyncBag {
+        return {
+            guid: "",
+            groupTypeRole: null,
+            syncDataView: null,
+            welcomeSystemCommunication: null,
+            exitSystemCommunication: null,
+            addUserAccountsDuringSync: false,
+            scheduleIntervalMinutes: 720,
+            lastRefreshDateTime: null
+        };
+    }
+
+    // #endregion
+
+    // #region Event Handlers
+
+    function onAdd(): void {
+        errorMessage.value = null;
+        theGroupSync.value = createNewGroupSync();
+        isModalVisible.value = true;
+    }
+
+    function onEdit(guid: string): void {
+        const selected = syncs.value.find(s => s.guid === guid);
+        if (!selected) {
+            return;
+        }
+        theGroupSync.value = { ...selected };
+        errorMessage.value = null;
+        isModalVisible.value = true;
+    }
+
+    function onDelete(guid: string): void {
+        syncs.value = syncs.value.filter(s => s.guid !== guid);
+    }
+
+    function onSave(): void {
+        const current = syncs.value;
+        const idx = current.findIndex(s => s.guid === theGroupSync.value.guid);
+        if (idx !== -1) {
+            const updated = [...current];
+            updated.splice(idx, 1, theGroupSync.value);
+            syncs.value = updated;
+        }
+        else {
+            theGroupSync.value.guid = newGuid();
+            syncs.value = [...current, theGroupSync.value];
+        }
+
+        errorMessage.value = null;
+        isModalVisible.value = false;
+    }
+
+    // #endregion
+</script>

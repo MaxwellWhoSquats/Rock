@@ -33,6 +33,9 @@ import { GroupAdministratorBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDe
 import { GroupDetailGroupTypeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailGroupTypeBag";
 import { GroupLinkagesBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLinkagesBag";
 import { GroupMeetingLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMeetingLocationBag";
+import { GroupMemberWorkflowTriggerBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberWorkflowTriggerBag";
+import { GroupRequirementBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupRequirementBag";
+import { GroupSyncBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupSyncBag";
 import { ParentGroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/parentGroupBag";
 import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 import { PublicAttributeBag } from "@Obsidian/ViewModels/Utility/publicAttributeBag";
@@ -173,6 +176,33 @@ export type GroupBag = {
      * GroupDetail.ascx.cs:1338-1357.
      */
     groupMemberAttributes?: PublicEditableAttributeBag[] | null;
+
+    /**
+     * Gets or sets the per-group member workflow triggers rendered
+     * in the Section 10 grid. Persisted by the Save action's step
+     * 4e using the SyncRelatedEntities pattern. The
+     * TypeQualifier 7-tuple is built server-side from each
+     * bag's typed qualifier fields; the Vue layer never touches
+     * the raw qualifier string.
+     */
+    groupMemberWorkflowTriggers?: GroupMemberWorkflowTriggerBag[] | null;
+
+    /**
+     * Gets or sets the per-group requirements rendered in the
+     * editable "Specific Group Requirements" grid. The read-only
+     * "From Group Type" grid is sourced from
+     * GroupTypeOptionsBag.GroupTypeRequirements instead.
+     * Persisted by the Save action's step 4c using the
+     * SyncRelatedEntities pattern.
+     */
+    groupRequirements?: GroupRequirementBag[] | null;
+
+    /**
+     * Gets or sets the per-group sync rules rendered in the
+     * Section 9 grid. Persisted by the Save action's step 4d using
+     * the SyncRelatedEntities pattern.
+     */
+    groupSyncs?: GroupSyncBag[] | null;
 
     /**
      * Gets or sets the Member Record Source selected on the
