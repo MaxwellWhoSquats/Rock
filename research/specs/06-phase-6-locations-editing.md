@@ -25,11 +25,11 @@ Architectural decisions for this phase are governed by [00-architecture.md](00-a
 ## Behavior delivered
 
 - **Section 4 Stack 2 (Locations editing)**: editable `<Grid>` of per-group meeting locations with columns Location / Type / Schedule(s) / Edit / Delete. Add button visibility gated on `AllowMultipleLocations || locations.length === 0` per WebForms parity at `GroupDetail.ascx.cs:3872`. Entire stack hidden when `GroupType.LocationSelectionMode == None`.
-- **Location modal (Add / Edit)**: tabbed dialog with Member tab + Other tab. Member tab populates a dropdown of `{Member} {AddressType} ({Address})` rows from the group's members' families. Other tab uses a `<LocationPicker>` with mode flags from `GroupType.LocationSelectionMode`. Tab visibility per `GroupLocationPickerMode` flags. Below the tabs: Location Type defined-value dropdown (scoped to `GroupType.LocationTypeValues`), Schedule(s) multi-picker (visible when `GroupType.EnableLocationSchedules`), Capacity repeater (Min / Desired / Max per selected schedule, visible when `GroupType.IsSchedulingEnabled`).
-- **Active-vs-inactive schedule reconciliation**: schedules that are attached to the location but are globally inactive remain attached across save. Mirrors WebForms `hfInactiveGroupLocationSchedules` at `GroupDetail.ascx.cs:3591-3594, 3810-3820`.
-- **Duplicate-location detection on Add**: Other-tab adds run `ExistingLocationOnAdd` detection (compare by `Name + Guid`) and surface a notification inside the modal. Mirrors WebForms `locpGroupLocation_SelectLocation` at `GroupDetail.ascx.cs:3907-3919`.
-- **Save body — Locations (step 4f)**: replaces the deleted GroupLocations + adds new + updates existing in state, reconciles `GroupLocationScheduleConfigs` (existing-vs-modified-vs-new-vs-deleted via the WebForms diff at `GroupDetail.ascx.cs:942-988`), cleans up `GroupMemberAssignment` rows for removed location/schedule combos (at `GroupDetail.ascx.cs:829-837, 906-917`), and sets `checkinDataUpdated = true` for the post-transaction `KioskDevice.Clear()` invalidation.
-- **Save body — Inline schedule lifecycle**: extends Phase 3's `ApplyInlineSchedule` to handle the full create/reuse/delete pattern at `GroupDetail.ascx.cs:1184-1252`. Inline schedule has `Name == string.Empty` convention; created when switching to Weekly / Custom from None / Named, reused when switching between Weekly / Custom, deleted (gated on `ScheduleService.CanDelete`) when switching away from Weekly / Custom.
+- **Location modal (Add / Edit)**: tabbed dialog titled `"Add Group Location Schedules"` / `"Edit Group Location Schedules"` per Q6.7, with Member tab + Other tab. Member tab populates a flat dropdown of `{Member} {AddressType} ({Address})` rows sourced from `GroupBag.FamilyMemberLocationOptions` per Q6.11; when source is empty, the tab body shows a warning notification per Q6.10. Other tab uses a `<LocationPicker>` with mode flags from `GroupType.LocationSelectionMode`; the modal's persisted bag carries `selectedLocation` + `selectedLocationMode` discriminator per Q6.9. Below the tabs: Location Type defined-value dropdown (scoped to `GroupType.LocationTypeValues`), Schedule(s) multi-picker (visible when `GroupType.EnableLocationSchedules`), Capacity matrix (Min / Desired / Max per selected schedule, visible only when `GroupType.IsSchedulingEnabled && selectedSchedules.length > 0` per Q6.8 inside a `<ConditionalWell>` with helper callout).
+- **Active-vs-inactive schedule reconciliation**: schedules that are attached to the location but are globally inactive remain attached across save. Handled server-side only per Q6.3 — the `SaveGroupLocations` helper loads existing schedules from the DB, partitions inactive, and unions with the bag's active list before writing. No `inactiveSchedules` field on the bag.
+- **Duplicate-location detection on Add and Edit**: both Add and Edit run duplicate detection per Q6.12 (Edit excludes the row being edited from the comparison set); on conflict, surface a notification inside the modal and clear the picker. Mirrors WebForms `locpGroupLocation_SelectLocation` at `GroupDetail.ascx.cs:3907-3919`, extended to also cover the Edit path.
+- **Save body — Locations (step 4f)**: a dedicated `SaveGroupLocations` helper per Q6.5 encapsulates the SyncRelatedEntities pattern + `GroupLocationScheduleConfig` diff (existing-vs-modified-vs-new-vs-deleted via the WebForms diff at `GroupDetail.ascx.cs:942-988`) + `GroupMemberAssignment` cleanup (at `GroupDetail.ascx.cs:829-837, 906-917`) + inactive-schedule preservation (Q6.3) + Location resolution from picker bag (Q6.9) as a single atomic unit inside `WrapTransaction`. Sets `checkinDataUpdated = true` for the post-transaction `KioskDevice.Clear()` invalidation.
+- **Save body — Inline schedule lifecycle**: extends Phase 3's `ApplyInlineSchedule` per Q6.2 + Q6.6 to handle the full create/reuse/delete pattern at `GroupDetail.ascx.cs:1184-1252`. Inline schedule keeps `Name == string.Empty` convention (Q6.2-a); reused when switching between Weekly / Custom so `Schedule.Id` stays stable for downstream attendance / history (Q6.2-b); deleted (gated on `ScheduleService.CanDelete`) when switching away from Weekly / Custom via the `DeleteInlineSchedule` helper that Phase 6 wires into the Save action (Q6.6).
 - **Cache invalidation (extending Phase 5's set)**: `KioskDevice.Clear()` fires post-transaction when `checkinDataUpdated == true` AND `GroupType.TakesAttendance == true`. Mirrors WebForms parity at `GroupDetail.ascx.cs:1432-1436`.
 - **View-side reactive refresh**: after a successful Save, the Vue layer's existing inbound watcher already re-bags the GroupBag including `bag.MeetingLocations` (Phase 2 work), so the view-panel map cards update without additional Phase 6 wiring.
 
@@ -57,33 +57,65 @@ None planned at draft time; the user's review pass between Phase 5 and Phase 6 s
 
 None planned at draft time.
 
-## Open questions for spec lock
+## Locked decisions
 
-Each has a default recommendation; the user confirms or overrides during the spec lock pass.
+All fourteen open questions resolved at spec lock (2026-05-12). Each lock records the question, the chosen resolution, and a brief rationale.
 
 ### Q6.1. Member-tab dropdown shape — full friendly text vs. structured row?
 
-WebForms emits `{Member.FullName} {AddressType.Value} ({Address})` as a flat ListItem. With 100+ members and 2-3 addresses each, the dropdown can hit 300+ rows. **Default recommendation:** preserve WebForms parity (flat dropdown with full friendly text); revisit only if scale-test surfaces a UX problem. Alternative: 2-stage picker (Member → Address) — defer to a follow-up bug if requested.
+WebForms emits `{Member.FullName} {AddressType.Value} ({Address})` as a flat ListItem; design screenshot confirms the same format. **Locked:** flat dropdown, full friendly text per row, all rows shipped in the bag on initial-load. Revisit only if scale-test surfaces a UX problem.
 
-### Q6.2. Inline-schedule `Name == string.Empty` convention — preserve or migrate to `ScheduleType` discriminator?
+### Q6.2. Inline-schedule convention + save lifecycle
 
-WebForms relies on `Schedule.Name == string.Empty` to detect inline schedules. The data model has a `ScheduleType` enum that could be used as a discriminator instead. **Default recommendation:** preserve the WebForms convention. Migrating would require a data migration to back-fill `ScheduleType` on every existing inline schedule and is out-of-scope for the conversion (it's a refactor of the entity model). Phase 6 reads + writes the convention as-is.
+Two coupled decisions: the inline-schedule detection convention, and the save lifecycle when switching schedule types. PSD ([Rock.Blocks/Cms/PersonalizationSegmentDetail.cs:353](Rock.Blocks/Cms/PersonalizationSegmentDetail.cs:353)) uses the same `Schedule.Name.IsNullOrWhiteSpace()` convention but with a different always-create-on-save lifecycle. For GroupDetail, downstream attendance + history references depend on `Schedule.Id` continuity. **Locked:** (a) preserve `Schedule.Name == string.Empty` as the inline marker; (b) reuse the existing Schedule entity when switching Weekly ↔ Custom so `Schedule.Id` stays stable. Phase 3's current `ApplyInlineSchedule` at [GroupDetail.cs:2185-2210](Rock.Blocks/Group/GroupDetail.cs:2185) already preserves the reuse semantic via `if ( entity.Schedule == null ) entity.Schedule = new Schedule { Name = string.Empty }`.
 
-### Q6.3. Active-vs-inactive schedule reconciliation surface in the bag — separate field or embed in Schedules?
+### Q6.3. Active-vs-inactive schedule reconciliation — server-side only
 
-WebForms uses a `hfInactiveGroupLocationSchedules` hidden field carrying comma-delimited inactive schedule Ids. The Obsidian bag could either (a) surface `inactiveScheduleIds: number[]` as a separate field per GroupLocation bag, or (b) embed the inactive flag on each schedule in the `Schedules` list. **Default recommendation:** option (a) — separate `inactiveSchedules: ListItemBag[]` field per `GroupLocationStateBag`, mirroring WebForms' separation of active (user-controlled via picker) vs inactive (preserved across save).
+WebForms' `hfInactiveGroupLocationSchedules` hidden field exists because WebForms is stateless across postbacks. Obsidian doesn't have that constraint; the inactive list is purely a server-side state-preservation concern (never displayed, never user-mutable). **Locked:** server-side reconciliation only. The bag's `schedules: ListItemBag[]` per `GroupLocationStateBag` carries active schedules only. The `SaveGroupLocations` helper loads existing `groupLocation.Schedules` from the DB, partitions out the inactive ones, and unions with the bag's active list before writing. No `inactiveSchedules` field on the bag.
 
-### Q6.4. Capacity repeater rebuild on schedule change — preserve in-progress edits?
+### Q6.4. Capacity matrix rebuild on schedule change — preserve in-progress edits
 
-WebForms' `spSchedules_SelectItem` handler at `GroupDetail.ascx.cs:3294-3348` tries to preserve in-progress capacity edits when the user changes the schedule list. The mechanism is fragile (re-binding the repeater while reading current values). **Default recommendation:** preserve the WebForms semantic — when a schedule is added to / removed from the schedule list, persist the existing capacity rows for unchanged schedules and reset only the changed rows. Vue's reactive model makes this easier than WebForms' repeater rebind.
+When the user adds/removes a schedule from the location's Schedule(s) picker, the capacity matrix updates. WebForms' `spSchedules_SelectItem` tries to preserve in-progress capacity edits via a fragile repeater rebind. **Locked:** preserve in-progress edits via Vue reactivity. The capacity matrix is backed by a `Map<scheduleId, capacity>` keyed by schedule. Adding a schedule appends a new row with empty Min/Desired/Max; removing a schedule drops only that row; other rows preserve their values.
 
-### Q6.5. `GroupMemberAssignment` cascade cleanup — block action vs Save body?
+### Q6.5. `GroupMemberAssignment` cascade cleanup — dedicated helper
 
-WebForms handles `GroupMemberAssignment` cleanup inside `btnSave_Click` at `GroupDetail.ascx.cs:829-837, 906-917`. **Default recommendation:** keep the cleanup inside the `Save` block action's `WrapTransaction` body as a new step 4f-cleanup phase, immediately before the standard `SaveChanges`. Co-locates the cleanup with the location writes so it's atomic.
+WebForms handles `GroupMemberAssignment` cleanup inline in `btnSave_Click` at [GroupDetail.ascx.cs:829-837](RockWeb/Blocks/Groups/GroupDetail.ascx.cs#L829) (full-location-removed) and [:906-917](RockWeb/Blocks/Groups/GroupDetail.ascx.cs#L906) (LocationId-changed). **Locked:** a dedicated `SaveGroupLocations` helper encapsulates the SyncRelatedEntities pattern + GroupLocationScheduleConfig diff + GroupMemberAssignment cleanup + inactive-schedule preservation (Q6.3) + Location resolution from picker bag (Q6.9) as a single atomic unit, invoked from step 4f inside the Save action's `WrapTransaction`. The Save block action body stays clean.
 
-### Q6.6. Group Schedule sub-fields (Section 4 Stack 1) — already wired in Phase 3?
+### Q6.6. Section 4 Stack 1 (Group Schedule) wiring — Phase 6 completes the lifecycle
 
-Phase 3 wired the radio + DayOfWeek + Time + ScheduleBuilder + SchedulePicker. Phase 6 only needs to extend `ApplyInlineSchedule` to do the full lifecycle. **Default recommendation:** confirm at spec lock that the radio + sub-fields are in place; Phase 6 owns only the persistence-side semantics (create / reuse / delete inline schedule + clear `Group.ScheduleId` when switching away).
+Phase 3 wired the radio + DayOfWeek + Time + ScheduleBuilder + SchedulePicker and shipped the partial `ApplyInlineSchedule` helper at [GroupDetail.cs:2158](Rock.Blocks/Group/GroupDetail.cs:2158). The `DeleteInlineSchedule` helper exists at [:2238](Rock.Blocks/Group/GroupDetail.cs:2238) but is **never called** from the Save flow today, so switching from Custom/Weekly to None leaves the orphan Schedule row in the DB. **Locked:** Phase 6 wires the missing cleanup. `Save` captures `oldScheduleId = entity.ScheduleId` before invoking `ApplyInlineSchedule`; after mutation, when the new state nulls or changes `Group.ScheduleId` away from the inline schedule, the Save action invokes `DeleteInlineSchedule(oldScheduleId.Value)` (gated by the existing `CanDelete` + `Name == empty` checks).
+
+### Q6.7. Modal title and save button label — design canonical
+
+WebForms `dlgLocations` uses title `"Group Location"` and save button `"Ok"`. Design ([edit-modal-01-location.png](../design/screenshots/edit-modal-01-location.png)) uses title `"Add Group Location Schedules"` (plural Schedules) and save button `"Save"`. **Locked:** design canonical. Add-mode title: `"Add Group Location Schedules"`. Edit-mode title: `"Edit Group Location Schedules"`. Save button: `"Save"`. Cancel button: `"Cancel"`.
+
+### Q6.8. Capacity matrix visibility gate — design conditional well
+
+WebForms shows the capacity repeater whenever `GroupType.IsSchedulingEnabled`, even with zero schedules selected (renders an empty repeater). Design ([edit-modal-01-location.png](../design/screenshots/edit-modal-01-location.png)) renders the capacity matrix inside a conditional well that only appears when at least one schedule is selected. **Locked:** capacity matrix is visible only when `GroupType.IsSchedulingEnabled && selectedSchedules.length > 0`. Wrapped in a `<ConditionalWell>` with helper callout: `"Set the **person capacity** for each of the configured schedules below."`.
+
+### Q6.9. LocationPicker bag shape on the Other tab — single field + mode discriminator
+
+Obsidian's `<LocationPicker>` emits different shapes per mode (ListItemBag for Named, AddressControlBag for Address, WKT string for Point/Polygon). WebForms `dlgLocations_OkClick` deferred Location.Id resolution until the full-form save. **Locked:** the modal's persisted bag carries a single `selectedLocation: ListItemBag | AddressControlBag | string | null` field with a sibling `selectedLocationMode: GroupLocationPickerMode` discriminator. Server-side resolution happens once at full-form save time via `ResolveLocationFromBag(GroupLocationStateBag bag)` → `LocationService.Get(...)` per mode. The Vue side never sees a numeric `Location.Id`.
+
+### Q6.10. Member tab visibility when source list is empty
+
+When the group has no members or no mappable family addresses, the Member dropdown source is empty. **Locked:** the Member tab itself remains visible whenever `GroupType.LocationSelectionMode & GroupMember`. When the dropdown source is empty, the dropdown is hidden and a `<NotificationBox alertType="warning">` renders inside the tab body with message `"Add group members first to attach their family addresses to this location."`. Default-tab selection on modal open: when Member dropdown is empty AND Other tab is available, default to Other; when only Member is available, stay on Member with the warning.
+
+### Q6.11. `FamilyMemberLocationBag` list placement — on `GroupBag`
+
+The Member-tab dropdown source is per-group (depends on which members are in this group), not per-GroupType. **Locked:** `GroupBag.FamilyMemberLocationOptions: List<FamilyMemberLocationBag>`. Server-side build via `BuildFamilyMemberLocationOptions(entity)` walking `GroupMemberService.GetByGroupId(groupId) → PersonService.GetFamilies(memberId) → family.GroupLocations.Where(...)`.
+
+### Q6.12. Duplicate-location detection on Edit — extend to both Add and Edit
+
+WebForms `ExistingLocationOnAdd` runs only when `hfAction.Value == "Add"`. The same data-integrity concern applies to Edit (user could edit a row to point at the same Location as another row). **Locked:** the duplicate check runs on both Add AND Edit. The Edit-mode check excludes the row being edited from the comparison set so the user can save without changing the Location.
+
+### Q6.13. Default tab when editing an existing location
+
+When the modal opens in Edit mode, the default tab should match the row's original origin so the form looks pre-filled. **Locked:** Edit-mode default tab inferred from `groupMemberPersonAliasGuid` (now Guid-typed per Q6.9 IdKey-friendly shape) — when set, default to Member; when null, default to Other. Mirrors WebForms' `GroupDetail.ascx.cs:3548-3559`.
+
+### Q6.14. Reorder UI for the locations grid
+
+Neither WebForms nor design includes a reorder UI. WebForms sets `groupLocation.Order` once on Add (to `max(Order) + 1`) and never updates it via drag/drop. **Locked:** no reorder UI. `Order` is set once on Add and stays put. Bag carries `order: number` for completeness but the grid has no `<ReorderColumn>` / drag handle. Adding a reorder UI would expand scope beyond the conversion mandate.
 
 ## Research coverage
 
@@ -103,33 +135,30 @@ Phase 3 wired the radio + DayOfWeek + Time + ScheduleBuilder + SchedulePicker. P
 
 ### L. Section 4 Stack 2 — Locations editing
 
-L1. Render Section 4 Stack 2 with editable `<Grid>` per design [edit-section-04.png](../design/screenshots/edit-section-04.png). Hidden when `GroupType.LocationSelectionMode == None`. Add button visibility gated on `AllowMultipleLocations || locations.length === 0`.
-L2. Grid columns: Location (string) / Type (string) / Schedule(s) (comma-delimited friendly text) / Edit / Delete.
-L3. Modal: tabbed dialog (Member tab + Other tab). Tab visibility per `GroupType.LocationSelectionMode & GroupMember` and `GroupType.LocationSelectionMode != None`. Tab default per WebForms: Member if available + has members; otherwise Other.
-L4. Member tab: dropdown of `{Member.FullName} {AddressType.Value} ({Address})` rows. Source from `GroupMemberService.GetByGroupId(groupId) → PersonService.GetFamilies(memberId) → family.GroupLocations.Where(l => l.IsMappedLocation && l.GroupLocationTypeValue.Guid != GROUP_LOCATION_TYPE_PREVIOUS)`. Value format `{LocationId}|{PersonId}`. Resolves to `GroupLocation.GroupMemberPersonAliasId` via `PersonAliasService.GetPrimaryAliasId(personId)` server-side.
-L5. Other tab: `<LocationPicker>` with `AllowedPickerModes` from `GroupType.LocationSelectionMode` flags. `MapStyleValueGuid` from the `MapStyle` block attribute. On select, run duplicate-add detection (compare by `Name + Guid` against current locations); surface a notification box inside the modal on conflict.
-L6. Below tabs: Location Type defined-value dropdown sourced from `GroupType.LocationTypeValues`. Schedule(s) multi-picker visible when `GroupType.EnableLocationSchedules`. Capacity repeater (Min / Desired / Max per selected schedule) visible when `GroupType.IsSchedulingEnabled`.
-L7. Active-vs-inactive schedule reconciliation per Q6.3 lock — separate `inactiveSchedules` field per GroupLocation bag, populated on load + preserved through save.
-L8. C# bag fields: `GroupLocations: List<GroupLocationStateBag>` on `GroupBag`; new `GroupLocationStateBag` with `Guid`, `LocationId`, `LocationName`, `LocationDescription`, `GroupLocationTypeValueId`, `Schedules: List<ListItemBag>`, `InactiveSchedules: List<ListItemBag>`, `GroupMemberPersonAliasId`, `Order`, `ScheduleConfigs: List<GroupLocationScheduleConfigBag>`.
-L9. C# helpers: `LoadGroupLocations(entity)`, `BuildLocationTypeOptions(groupType)`, `BuildFamilyMemberLocationOptions(entity)`, `SaveGroupLocations(entity, bags)`.
-L10. Save body step 4f: `SyncRelatedEntities<GroupLocation>` extended with `GroupLocationScheduleConfig` diff logic (existing-vs-modified-vs-new-vs-deleted per WebForms `GroupDetail.ascx.cs:942-988`) and `GroupMemberAssignment` cleanup (delete rows matching old (scheduleId, locationId, groupId) tuples).
-L11. Cache invalidation: `checkinDataUpdated` flag tracked through SaveGroupLocations; post-transaction fires `KioskDevice.Clear()` when `checkinDataUpdated && GroupType.TakesAttendance`.
+L1. Render Section 4 Stack 2 with editable `<Grid>` per design [edit-section-04.png](../design/screenshots/edit-section-04.png). Hidden when `GroupType.LocationSelectionMode == None`. Add button visibility gated on `AllowMultipleLocations || locations.length === 0`. No reorder UI per Q6.14 lock (`Order` set once on Add to `max(Order) + 1`).
+L2. Grid columns: Location (string) / Type (string) / Schedule(s) (comma-delimited friendly text of active schedules only) / Edit / Delete.
+L3. Modal: tabbed dialog (Member tab + Other tab). Modal title `"Add Group Location Schedules"` / `"Edit Group Location Schedules"` per Q6.7 lock; save button `"Save"`, cancel button `"Cancel"`. Member tab visibility per `GroupType.LocationSelectionMode & GroupMember` flag; Other tab visibility per `GroupType.LocationSelectionMode != None`. Edit-mode default tab inferred from `groupMemberPersonAliasGuid` per Q6.13 lock (Member when set, Other when null). Add-mode default tab: Member when source non-empty AND Other unavailable; Other when source empty OR Other available.
+L4. Member tab: dropdown of `{Member.FullName} {AddressType.Value} ({Address})` rows, sourced from `GroupBag.FamilyMemberLocationOptions` per Q6.11 lock. Server-side build via `BuildFamilyMemberLocationOptions(entity)` walking `GroupMemberService.GetByGroupId(groupId) → PersonService.GetFamilies(memberId) → family.GroupLocations.Where(l => l.IsMappedLocation && l.GroupLocationTypeValue.Guid != GROUP_LOCATION_TYPE_PREVIOUS)`. When source is empty (group has zero members or no mappable family addresses), the dropdown is hidden and a `<NotificationBox alertType="warning">` renders inside the tab body per Q6.10 lock with message `"Add group members first to attach their family addresses to this location."`.
+L5. Other tab: `<LocationPicker>` with `AllowedPickerModes` from `GroupType.LocationSelectionMode` flags. `MapStyleValueGuid` from the `MapStyle` block attribute. Modal state carries a single `selectedLocation` field (typed `ListItemBag | AddressControlBag | string | null`) with a sibling `selectedLocationMode: GroupLocationPickerMode` discriminator per Q6.9 lock; server resolves to `Location.Id` at full-form save time via `ResolveLocationFromBag(...)` per mode. Duplicate-location detection runs on both Add AND Edit per Q6.12 lock (Edit excludes the row being edited from the comparison set); on conflict, surface a notification box inside the modal and clear the picker.
+L6. Below tabs: Location Type defined-value dropdown sourced from `GroupType.LocationTypeValues`. Schedule(s) multi-picker visible when `GroupType.EnableLocationSchedules`. Capacity matrix (Min / Desired / Max per selected schedule) visible only when `GroupType.IsSchedulingEnabled && selectedSchedules.length > 0` per Q6.8 lock, wrapped in `<ConditionalWell>` with helper callout `"Set the **person capacity** for each of the configured schedules below."`. Capacity edits preserved across schedule-list changes via Vue reactive `Map<scheduleGuid, capacity>` keyed by schedule per Q6.4 lock.
+L7. Active-vs-inactive schedule reconciliation handled server-side only per Q6.3 lock. Bag's `Schedules: List<ListItemBag>` carries active schedules only; the `SaveGroupLocations` helper reads existing `groupLocation.Schedules` from the DB, partitions inactive (`Where(s => !s.IsActive)`), and unions with the bag's active list before writing.
+L8. C# bag fields: `GroupLocations: List<GroupLocationStateBag>` on `GroupBag`; new `GroupLocationStateBag` with `Guid`, `LocationName`, `LocationDescription`, `SelectedLocationMode`, `SelectedLocation`, `GroupLocationTypeValueGuid`, `GroupLocationTypeValueName`, `Schedules: List<ListItemBag>` (active only), `GroupMemberPersonAliasGuid`, `Order`, `ScheduleConfigs: List<GroupLocationScheduleConfigBag>`. New `FamilyMemberLocationBag` for the Member-tab dropdown source. New `GroupBag.FamilyMemberLocationOptions: List<FamilyMemberLocationBag>` per Q6.11 lock.
+L9. C# helpers: `LoadGroupLocations(entity)`, `BuildLocationTypeOptions(groupType)`, `BuildFamilyMemberLocationOptions(entity)`, `ResolveLocationFromBag(GroupLocationStateBag bag)` (per Q6.9 lock; routes by `SelectedLocationMode` to the appropriate `LocationService.Get(...)` overload), `SaveGroupLocations(entity, bags)`.
+L10. Save body step 4f: invoke `SaveGroupLocations(entity, bag.GroupLocations)` per Q6.5 lock. The helper encapsulates `SyncRelatedEntities<GroupLocation>`-style pattern + `GroupLocationScheduleConfig` diff (existing-vs-modified-vs-new-vs-deleted per WebForms `GroupDetail.ascx.cs:942-988`) + `GroupMemberAssignment` cleanup (delete rows matching old `(scheduleId, locationId, groupId)` tuples per WebForms `:829-837` and `:906-917`) + inactive-schedule preservation (Q6.3) + Location resolution from picker bag (Q6.9) + duplicate-detection guard (Q6.12, server-side defensive check) as a single atomic unit inside `WrapTransaction`.
+L11. Cache invalidation: `checkinDataUpdated` flag tracked through `SaveGroupLocations`; post-transaction fires `KioskDevice.Clear()` when `checkinDataUpdated && GroupType.TakesAttendance`.
 L12. GroupType cascade extension: `GroupTypeOptionsBag` extends with `AllowMultipleLocations`, `LocationTypeValueOptions: List<ListItemBag>`, `MapStyleValueGuid` (already on `GroupDetailOptionsBag`; resurface on the options bag for cascade reactivity).
 
 ### IS. Inline Schedule lifecycle (Section 4 Stack 1 — extend Phase 3 `ApplyInlineSchedule`)
 
 IS1. Save body — Inline schedule entity management. Mirrors WebForms `GroupDetail.ascx.cs:1184-1252`. When `bag.ScheduleType` is `Custom` or `Weekly`:
-   - If `oldScheduleId.HasValue && entity.Schedule != null`: reuse the existing inline schedule entity (preserves `Schedule.Id` across switches between Custom and Weekly).
-   - Else create a new `Schedule` with `Name = string.Empty` (the inline-marker convention per Q6.2 lock).
+   - If `entity.Schedule != null` (already-attached inline schedule): reuse the existing inline schedule entity per Q6.2-b lock so `Schedule.Id` stays stable across Weekly ↔ Custom switches (preserves downstream attendance and history references).
+   - Else create a new `Schedule` with `Name = string.Empty` (the inline-marker convention per Q6.2-a lock).
    - For Custom: write `iCalendarContent` from `bag.ICalendarContent`; null out `WeeklyDayOfWeek` + `WeeklyTimeOfDay`.
    - For Weekly: write `WeeklyDayOfWeek` + `WeeklyTimeOfDay` from bag; null out `iCalendarContent`.
-IS2. When `bag.ScheduleType` is `None` or `Named` AND `oldScheduleId.HasValue`:
-   - Look up the old `Schedule` via `ScheduleService.Get(oldScheduleId)`.
-   - If `schedule.Name == string.Empty` (inline) AND `ScheduleService.CanDelete(schedule, out _)` returns true: `ScheduleService.Delete(schedule)`.
-   - Otherwise leave the schedule entity in place (Group.ScheduleId clears, but the schedule entity persists if it has other consumers).
-IS3. When `bag.ScheduleType` is `Named`: write `entity.ScheduleId = NamedSchedule.GetEntityId<Schedule>(RockContext)`. When `None`: clear `entity.ScheduleId = null`.
-IS4. Defensive demotions per WebForms `GroupDetail.ascx.cs:1184-1201`: if `bag.ScheduleType == Custom` but `iCalendarContent` fails to parse via `InetCalendarHelper.CreateCalendarEvent`, silently demote to `None`. If `bag.ScheduleType == Weekly` but `WeeklyDayOfWeek == null`, silently demote to `None`.
-IS5. Phase 3 dead-return removal: Phase 3's `ApplyInlineSchedule` had a placeholder return signature with a dead path. Phase 6 replaces the body with the full lifecycle so the return is meaningful (returns `int? oldScheduleId` to surface for the post-save schedule-delete check).
+IS2. Save flow — capture `oldScheduleId = entity.ScheduleId` BEFORE invoking `ApplyInlineSchedule`. After mutation, when the new state nulls or changes `Group.ScheduleId` away from the inline schedule (i.e., user switched from Custom/Weekly to None or Named), the Save action invokes `DeleteInlineSchedule(oldScheduleId.Value)` per Q6.6 lock. The existing `DeleteInlineSchedule` helper at [GroupDetail.cs:2238](Rock.Blocks/Group/GroupDetail.cs:2238) already gates on `Name == string.Empty` and `ScheduleService.CanDelete`, so it's safe to call unconditionally when `oldScheduleId.HasValue`.
+IS3. When `bag.ScheduleType` is `Named`: write `entity.ScheduleId = NamedSchedule.GetEntityId<Schedule>(RockContext)` and clear `entity.Schedule = null` to detach the EF navigation. When `None`: clear both `entity.ScheduleId` and `entity.Schedule`.
+IS4. Defensive demotions per WebForms `GroupDetail.ascx.cs:1184-1201`: if `bag.ScheduleType == Custom` but `iCalendarContent` fails to parse via `InetCalendarHelper.CreateCalendarEvent`, silently demote to `None`. If `bag.ScheduleType == Weekly` but `WeeklyDayOfWeek == null`, silently demote to `None`. Phase 3's `ApplyInlineSchedule` already implements both gates at [GroupDetail.cs:2162-2183](Rock.Blocks/Group/GroupDetail.cs:2162); Phase 6 preserves them unchanged.
+IS5. Save action wiring: capture `oldScheduleId` before `ApplyInlineSchedule`; after mutation, when `entity.ScheduleId != oldScheduleId && oldScheduleId.HasValue`, invoke `DeleteInlineSchedule(oldScheduleId.Value)`. Placement: inside the `Save` block action body, alongside `ApplyInlineSchedule`, before `WrapTransaction` opens (mirrors Phase 3 placement). The actual `SaveChanges` runs inside step 8.
 
 ### V. Vue file structure
 
@@ -147,8 +176,10 @@ SS3. Post-`WrapTransaction` cache invalidation extension: add `if (checkinDataUp
 
 - Updating still-WebForms outbound destinations: **Phase 7**.
 - Cutover and WebForms file deletion: **Phase 8**.
-- Member-tab dropdown scale optimization (typeahead / virtualization): out of scope; preserve WebForms parity per Q6.1 default.
-- Inline-schedule `Name`-vs-`ScheduleType` discriminator migration: out of scope per Q6.2 default.
+- Member-tab dropdown scale optimization (typeahead / virtualization): out of scope per Q6.1 lock; preserve WebForms flat-list parity. A `GetFamilyMemberLocations` lazy-load block action could be added later if scale-test surfaces a problem.
+- Inline-schedule `Name`-vs-`ScheduleType` discriminator migration: out of scope per Q6.2 lock.
+- Reorder UI for the locations grid: out of scope per Q6.14 lock; neither WebForms nor design includes one.
+- Replacing the WebForms inline-schedule reuse semantic with PSD's always-create-on-save pattern: out of scope per Q6.2 lock; ScheduleId continuity is required for downstream attendance / history references.
 
 ## Files to create / modify
 
@@ -185,32 +216,34 @@ interface GroupBag {
     // (existing Phase 1-5 fields unchanged)
 
     groupLocations: GroupLocationStateBag[];
+    familyMemberLocationOptions: FamilyMemberLocationBag[];  // per Q6.11 lock
 }
 
 interface GroupLocationStateBag {
     guid: string;
-    locationId: number;
-    locationName: string;
+    locationName: string;                                   // friendly text for grid display
     locationDescription?: string | null;
-    groupLocationTypeValueId?: number | null;
+    selectedLocationMode: GroupLocationPickerMode;          // per Q6.9 lock (Named / Address / Point / Polygon / GroupMember)
+    selectedLocation: ListItemBag | AddressControlBag | string | null;  // raw picker emit per Q6.9 lock
+    groupLocationTypeValueGuid?: string | null;
     groupLocationTypeValueName?: string | null;
-    schedules: ListItemBag[];               // user-controlled (active picker)
-    inactiveSchedules: ListItemBag[];       // preserved across save, hidden from UI
-    groupMemberPersonAliasId?: number | null;
-    order: number;
+    schedules: ListItemBag[];                               // active only per Q6.3 lock; inactive merged server-side
+    groupMemberPersonAliasGuid?: string | null;             // set for Member-tab rows; drives Edit-mode default tab per Q6.13
+    order: number;                                          // set once on Add per Q6.14; no UI reorder
     scheduleConfigs: GroupLocationScheduleConfigBag[];
 }
 
 interface GroupLocationScheduleConfigBag {
-    scheduleId: number;
+    scheduleGuid: string;                                   // resolved server-side to ScheduleId
     minimumCapacity?: number | null;
     desiredCapacity?: number | null;
     maximumCapacity?: number | null;
 }
 
 interface FamilyMemberLocationBag {
-    value: string;       // "{LocationId}|{PersonId}"
-    text: string;        // friendly text
+    locationGuid: string;                                   // Location.Guid for the family address
+    personAliasGuid: string;                                // PersonAlias.Guid (primary alias) for the member
+    text: string;                                           // friendly text "{Member} {AddressType} ({Address})"
 }
 
 interface GroupTypeOptionsBag {
@@ -226,9 +259,8 @@ interface GroupTypeOptionsBag {
 
 | Action | Request | Returns | Notes |
 |---|---|---|---|
-| `Save` (extended) | `ValidPropertiesBox<GroupBag>` | Same as Phase 5 | Adds step 4f (SaveGroupLocations) + post-transaction `KioskDevice.Clear()` invalidation. |
-| `Edit`, `GetGroupTypeOptions`, `Delete`, `Archive`, `ArchiveWithChildren`, `Copy` | unchanged | unchanged | The cascade payload `GroupTypeOptionsBag` extends with three new fields. |
-| `GetFamilyMemberLocations` (NEW, optional) | `{ groupKey: string }` | `List<FamilyMemberLocationBag>` | Optional lazy-load if the dropdown row count is too large for the initial bag. Phase 6 implementation can choose initial-load (simpler) or lazy-load (scalable). Default: initial-load, surfaced in `GroupTypeOptionsBag` or a sibling field. |
+| `Save` (extended) | `ValidPropertiesBox<GroupBag>` | Same as Phase 5 | Adds step 4f (`SaveGroupLocations`) + Q6.6 inline-schedule cleanup (`oldScheduleId` capture + `DeleteInlineSchedule` invocation) + post-transaction `KioskDevice.Clear()` invalidation. |
+| `Edit`, `GetGroupTypeOptions`, `Delete`, `Archive`, `ArchiveWithChildren`, `Copy` | unchanged | unchanged | The cascade payload `GroupTypeOptionsBag` extends with three new fields (`AllowMultipleLocations`, `LocationTypeValueOptions`, `MapStyleValueGuid`); `Edit` payload extends `GroupBag` with `GroupLocations` and `FamilyMemberLocationOptions` per Q6.11 lock. |
 
 ## Save action contributions
 
@@ -243,9 +275,12 @@ See checklist L10 / IS1-IS3 / SS1-SS3 for the extended save flow. Cascades and c
 
 - `SyncRelatedEntities<TEntity>` helper for state-list saves (already inlined into GroupDetail.cs in Phase 5).
 - Per-location config diff pattern (mirror WebForms exactly per checklist L10 — this is the most error-prone diff in the block).
-- `Schedule.Name == string.Empty` convention for inline-schedule detection (Q6.2 lock).
-- `ScheduleService.CanDelete` gate before deleting an inline schedule (IS2).
-- Tab-switching state pattern in the location modal (single `activeTab: "member" | "other"` ref + computed visibility).
+- `Schedule.Name == string.Empty` convention for inline-schedule detection (Q6.2-a lock); reuse-existing entity for Weekly ↔ Custom transitions (Q6.2-b lock).
+- `ScheduleService.CanDelete` gate before deleting an inline schedule (IS2). Phase 3's `DeleteInlineSchedule` helper at [GroupDetail.cs:2238](Rock.Blocks/Group/GroupDetail.cs:2238) is the canonical implementation; Phase 6 wires its call site.
+- Tab-switching state pattern in the location modal: single `activeTab: "member" | "other"` ref + computed visibility per Q6.10 lock (notification surface when Member dropdown source is empty).
+- `<TabbedContent>` from `@Obsidian/Controls/tabbedContent.obs` for the dialog's tab nav (per [research/design/04-component-inventory.md](../design/04-component-inventory.md)).
+- Modal-helper-pattern: `SaveGroupLocations` as a self-contained unit per Q6.5 lock, called from the Save action's step 4f inside `WrapTransaction`.
+- Picker-emit pattern (Q6.9): bag carries `selectedLocation` + `selectedLocationMode` discriminator; server-side `ResolveLocationFromBag` routes by mode to the appropriate `LocationService.Get(...)` overload.
 
 ## Design references
 
