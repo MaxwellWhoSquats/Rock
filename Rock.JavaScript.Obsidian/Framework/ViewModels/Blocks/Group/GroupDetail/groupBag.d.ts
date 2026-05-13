@@ -333,6 +333,17 @@ export type GroupBag = {
     isChatChannelPublicOverride?: boolean | null;
 
     /**
+     * Gets or sets the effective chat-enabled state for view-mode
+     * rendering. True only when the system chat feature is enabled
+     * AND Rock.Model.Group.GetIsChatEnabled resolves
+     * to true (group type allows chat AND the override / group-type
+     * default evaluate to true). Populated by
+     * GetEntityBagForView; left false for edit mode.
+     * Drives the "Chat-Enabled" view-mode label.
+     */
+    isChatEnabled: boolean;
+
+    /**
      * Gets or sets the chat-enabled override (null = inherit, true
      * = yes, false = no). Persisted to
      * Group.IsChatEnabledOverride.
@@ -557,8 +568,18 @@ export type GroupBag = {
     scheduleConfirmationLogic?: ScheduleConfirmationLogic | null;
 
     /**
+     * Gets or sets whether this group explicitly overrides the
+     * GroupType's ScheduleCoordinatorNotificationTypes. When false,
+     * scheduleCoordinatorNotificationTypes is ignored on save and the
+     * entity column is set to null (inherit). When true, the bitmask
+     * is persisted (zero flags = explicit None override).
+     */
+    hasCoordinatorNotificationOverride: boolean;
+
+    /**
      * Gets or sets the bitmask of coordinator notification types
-     * (Accept / Decline / SelfSchedule). Per Q11, an empty selection
+     * (Accept / Decline / SelfSchedule). Only persisted when
+     * hasCoordinatorNotificationOverride is true; an empty selection
      * (zero flags set) means
      * Rock.Model.ScheduleCoordinatorNotificationType.None.
      * Persisted to Group.ScheduleCoordinatorNotificationTypes.

@@ -525,9 +525,21 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public ListItemBag ScheduleCoordinatorPerson { get; set; }
 
         /// <summary>
+        /// Gets or sets whether this group explicitly overrides the
+        /// GroupType's <c>ScheduleCoordinatorNotificationTypes</c>. When
+        /// <c>false</c>, <see cref="ScheduleCoordinatorNotificationTypes"/>
+        /// is ignored on save and the entity column is set to
+        /// <c>null</c> (inherit). When <c>true</c>, the bitmask in
+        /// <see cref="ScheduleCoordinatorNotificationTypes"/> is persisted
+        /// (zero flags = explicit None override).
+        /// </summary>
+        public bool HasCoordinatorNotificationOverride { get; set; }
+
+        /// <summary>
         /// Gets or sets the bitmask of coordinator notification types
-        /// (Accept / Decline / SelfSchedule). Per Q11, an empty selection
-        /// (zero flags set) means
+        /// (Accept / Decline / SelfSchedule). Only persisted when
+        /// <see cref="HasCoordinatorNotificationOverride"/> is <c>true</c>;
+        /// an empty selection (zero flags set) means
         /// <see cref="Rock.Model.ScheduleCoordinatorNotificationType.None"/>.
         /// Persisted to <c>Group.ScheduleCoordinatorNotificationTypes</c>.
         /// </summary>
@@ -587,6 +599,17 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// the chat-avatar pattern at webforms/14-chat.md.
         /// </summary>
         public ListItemBag ChatChannelAvatarBinaryFile { get; set; }
+
+        /// <summary>
+        /// Gets or sets the effective chat-enabled state for view-mode
+        /// rendering. True only when the system chat feature is enabled
+        /// AND <see cref="Rock.Model.Group.GetIsChatEnabled"/> resolves
+        /// to true (group type allows chat AND the override / group-type
+        /// default evaluate to true). Populated by
+        /// <c>GetEntityBagForView</c>; left false for edit mode.
+        /// Drives the "Chat-Enabled" view-mode label.
+        /// </summary>
+        public bool IsChatEnabled { get; set; }
 
         #endregion
 

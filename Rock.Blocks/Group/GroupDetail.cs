@@ -311,6 +311,21 @@ namespace Rock.Blocks.Group
 
         #endregion Fields
 
+        #region Properties
+
+        /// <summary>
+        /// System-wide chat feature flag. Aliases
+        /// <see cref="ChatHelper.IsChatEnabled"/> so the chat call sites
+        /// in this block read consistently and so a single rename point
+        /// covers them all. Distinct from
+        /// <see cref="GroupBag.IsChatEnabled"/> (effective per-group
+        /// state) and <see cref="Group.IsChatEnabledOverride"/>
+        /// (per-group override).
+        /// </summary>
+        private static bool IsSystemChatEnabled => ChatHelper.IsChatEnabled;
+
+        #endregion Properties
+
         #region Methods
 
         /// <inheritdoc/>
@@ -582,6 +597,8 @@ namespace Rock.Blocks.Group
                 bag.RoleLimitWarning = roleLimitWarning;
             }
 
+            bag.IsChatEnabled = IsSystemChatEnabled && entity.GetIsChatEnabled();
+
             bag.LoadAttributesAndValuesForPublicView( entity, RequestContext.CurrentPerson, enforceSecurity: true );
 
             return bag;
@@ -650,6 +667,7 @@ namespace Rock.Blocks.Group
             bag.DisableScheduleToolboxAccess = entity.DisableScheduleToolboxAccess;
             bag.ScheduleConfirmationLogic = entity.ScheduleConfirmationLogic;
             bag.ScheduleCoordinatorPerson = BuildPersonAliasListItemBag( entity.ScheduleCoordinatorPersonAlias );
+            bag.HasCoordinatorNotificationOverride = entity.ScheduleCoordinatorNotificationTypes.HasValue;
             bag.ScheduleCoordinatorNotificationTypes = entity.ScheduleCoordinatorNotificationTypes ?? ScheduleCoordinatorNotificationType.None;
             bag.AttendanceRecordRequiredForCheckIn = entity.AttendanceRecordRequiredForCheckIn;
 
@@ -925,8 +943,14 @@ namespace Rock.Blocks.Group
                     : null;
             } );
 
+            // Gate the coordinator-notifications field on
+            // HasCoordinatorNotificationOverride. When the gate is off the
+            // entity column stays null (inherit from GroupType); when on,
+            // the bitmask is persisted (zero flags = explicit None).
             box.IfValidProperty( nameof( box.Bag.ScheduleCoordinatorNotificationTypes ),
-                () => entity.ScheduleCoordinatorNotificationTypes = box.Bag.ScheduleCoordinatorNotificationTypes );
+                () => entity.ScheduleCoordinatorNotificationTypes = box.Bag.HasCoordinatorNotificationOverride
+                    ? box.Bag.ScheduleCoordinatorNotificationTypes
+                    : ( ScheduleCoordinatorNotificationType? ) null );
 
             box.IfValidProperty( nameof( box.Bag.AttendanceRecordRequiredForCheckIn ),
                 () => entity.AttendanceRecordRequiredForCheckIn = box.Bag.AttendanceRecordRequiredForCheckIn );
@@ -934,7 +958,7 @@ namespace Rock.Blocks.Group
             // Chat overrides — only when the group type allows.
             box.IfValidProperty( nameof( box.Bag.IsChatEnabledOverride ), () =>
             {
-                if ( ChatHelper.IsChatEnabled && groupType?.IsChatAllowed == true )
+                if ( IsSystemChatEnabled && groupType?.IsChatAllowed == true )
                 {
                     entity.IsChatEnabledOverride = box.Bag.IsChatEnabledOverride;
                     entity.IsLeavingChatChannelAllowedOverride = box.Bag.IsLeavingChatChannelAllowedOverride;
@@ -2189,7 +2213,7 @@ namespace Rock.Blocks.Group
         private void ApplyChatChannelAvatarBinaryFile( Model.Group entity, GroupBag bag )
         {
             var groupType = GetGroupTypeCache( entity );
-            if ( !ChatHelper.IsChatEnabled || groupType?.IsChatAllowed != true )
+            if ( !IsSystemChatEnabled || groupType?.IsChatAllowed != true )
             {
                 return;
             }
@@ -2519,7 +2543,7 @@ namespace Rock.Blocks.Group
 
             // Visibility flags.
             bag.IsRsvpSectionVisible = groupType.EnableRSVP;
-            bag.IsChatSectionVisible = ChatHelper.IsChatEnabled && groupType.IsChatAllowed;
+            bag.IsChatSectionVisible = IsSystemChatEnabled && groupType.IsChatAllowed;
             bag.IsSchedulingSectionVisible = ( groupType.AllowedScheduleTypes & ( ScheduleType.Weekly | ScheduleType.Custom | ScheduleType.Named ) ) != 0;
             bag.IsPeerNetworkSectionVisible = groupType.IsPeerNetworkEnabled;
             bag.IsAdministratorVisible = groupType.ShowAdministrator;
@@ -3555,10 +3579,10 @@ namespace Rock.Blocks.Group
                 GroupLocationTypeValueGuid = gl.GroupLocationTypeValue?.Guid,
                 GroupLocationTypeValueName = gl.GroupLocationTypeValue?.Value,
                 GroupMemberPersonAliasGuid = gl.GroupMemberPersonAlias?.Guid,
-                Order = gl.Order,
                 Schedules = ( gl.Schedules ?? new List<Schedule>() )
                     .Where( s => s.IsActive )
-                    .OrderBy( s => s.Order )
+                    .OrderBy( s => s.GetNextStartDateTime( RockDateTime.Now.SundayDate().AddDays( 1 ) ) ?? DateTime.MaxValue )
+                    .ThenBy( s => s.Order )
                     .ThenBy( s => s.Id )
                     .Select( s => new ListItemBag
                     {

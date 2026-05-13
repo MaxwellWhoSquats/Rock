@@ -82,13 +82,6 @@ export type GroupLocationStateBag = {
     locationName?: string | null;
 
     /**
-     * Gets or sets the sort order of this GroupLocation.
-     * Assigned once on Add (max(Order) + 1) per Q6.14; no UI
-     * reorder.
-     */
-    order: number;
-
-    /**
      * Gets or sets the per-schedule capacity matrix entries (one
      * row per selected schedule). Persisted as
      * GroupLocationScheduleConfig rows owned by the

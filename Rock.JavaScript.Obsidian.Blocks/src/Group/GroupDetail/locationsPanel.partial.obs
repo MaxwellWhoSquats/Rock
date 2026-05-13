@@ -2,7 +2,8 @@
 <template>
     <ContentStack v-if="isStackVisible"
                   title="Group Location Schedules"
-                  description="Provide the location-specific schedules used for this group.">
+                  description="Provide the location-specific schedules used for this group."
+                  headerLocation="top">
         <Grid :data="gridData"
               keyField="guid"
               itemTerm="Group Location"
@@ -142,7 +143,6 @@
             groupLocationTypeValueName: null,
             schedules: [],
             groupMemberPersonAliasGuid: null,
-            order: 0,
             scheduleConfigs: []
         };
     }
@@ -186,10 +186,6 @@
         }
         else {
             value.guid = newGuid();
-            // Order is assigned once on Add per Q6.14 lock. The server
-            // re-computes max(Order) + 1 on save, so the UI value here
-            // is informational.
-            value.order = (current.length > 0 ? Math.max(...current.map(l => l.order ?? 0)) : -1) + 1;
             groupLocations.value = [...current, value];
         }
         isModalVisible.value = false;

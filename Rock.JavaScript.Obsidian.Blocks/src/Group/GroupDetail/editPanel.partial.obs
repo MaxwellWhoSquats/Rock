@@ -1,6 +1,10 @@
 <!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
 <template>
-    <ContentSectionContainer>
+    <ContentSectionContainer :sidebar="false">
+        <NotificationBox v-if="isSystem" alertType="info">
+            <strong>Note</strong> Because this group is used by Rock, editing is restricted.
+        </NotificationBox>
+
         <NotificationBox v-if="errorMessage" alertType="danger" v-html="errorMessage" />
 
         <!-- ========================== -->
@@ -300,6 +304,8 @@
                                       showBlankItem
                                       enhanceForLongLists />
                     </div>
+                </div>
+                <div class="row">
                     <div class="col-md-6">
                         <NumberBox v-model="rsvpReminderOffsetDays"
                                    label="RSVP Reminder Lead Time"
@@ -320,30 +326,34 @@
         <!-- Section 4 - Scheduling -->
         <!-- ========================== -->
         <ContentSection v-if="groupTypeOptions.isSchedulingSectionVisible || groupTypeOptions.isSchedulingEnabled"
-                        title="Scheduling"
-                        description="Schedule, scheduling preferences, and check-in.">
+                        title="Meeting &amp; Scheduling Details" icon="ti ti-calendar-month">
 
             <!-- Stack 1 - Overall Group Schedule -->
             <ContentStack v-if="groupTypeOptions.isSchedulingSectionVisible"
                           title="Overall Group Schedule"
-                          description="When the group regularly meets.">
+                          description="Provide the schedule used to represent when this group meets as a whole.">
                 <RadioButtonList v-model="scheduleTypeValue"
-                                 label="Schedule Type"
-                                 :items="scheduleTypeItems"
-                                 horizontal />
+                                 label="Group Schedule"
+                                 :items="scheduleTypeItems" />
 
-                <div v-if="scheduleType === scheduleTypeWeekly">
-                    <DayOfWeekPicker v-model="weeklyDayOfWeekValue" label="Day of Week" />
-                    <TimePicker v-model="weeklyTimeOfDayValue" label="Time" />
-                </div>
+                <ConditionalWell v-if="scheduleType !== scheduleTypeNone">
+                    <div v-if="scheduleType === scheduleTypeWeekly" class="row">
+                        <div class="col-md-6">
+                            <DayOfWeekPicker v-model="weeklyDayOfWeekValue" label="Day of Week" />
+                        </div>
+                        <div class="col-md-6">
+                            <TimePicker v-model="weeklyTimeOfDayValue" label="Time of Day" />
+                        </div>
+                    </div>
 
-                <ScheduleBuilder v-if="scheduleType === scheduleTypeCustom"
-                                 v-model="iCalendarContent"
-                                 label="Custom Schedule" />
+                    <ScheduleBuilder v-if="scheduleType === scheduleTypeCustom"
+                                     v-model="iCalendarContent"
+                                     label="Custom Schedule" />
 
-                <SchedulePicker v-if="scheduleType === scheduleTypeNamed"
-                                v-model="namedSchedule"
-                                label="Named Schedule" />
+                    <SchedulePicker v-if="scheduleType === scheduleTypeNamed"
+                                    v-model="namedSchedule"
+                                    label="Named Schedule" />
+                </ConditionalWell>
             </ContentStack>
 
             <!-- Stack 2 - Locations editing (Phase 6) -->
@@ -359,33 +369,54 @@
             <!-- Stack 3 - Member Scheduling & Check-in -->
             <ContentStack v-if="groupTypeOptions.isSchedulingEnabled || groupTypeOptions.isCheckInRequirementsVisible"
                           title="Member Scheduling &amp; Check-in"
-                          description="Scheduling permissions, coordinator notifications, and check-in behavior.">
-                <CheckBox v-model="disableScheduling"
-                          label="Disable Group Member Scheduling" />
-
-                <CheckBox v-model="disableScheduleToolboxAccess"
-                          label="Hide from Schedule Toolbox" />
-
-                <CheckBox v-model="schedulingMustMeetRequirements"
-                          label="Require Member Requirements for Scheduling" />
-
-                <DropDownList v-if="groupTypeOptions.isScheduleConfirmationLogicVisible"
-                              v-model="scheduleConfirmationLogicValue"
-                              label="Confirmation Behavior"
-                              :items="scheduleConfirmationLogicItems"
-                              :showBlankItem="true" />
-
-                <PersonPicker v-if="groupTypeOptions.isScheduleCoordinatorVisible"
-                              v-model="scheduleCoordinatorPerson"
-                              label="Schedule Coordinator" />
-
-                <div v-if="groupTypeOptions.isCoordinatorNotificationsVisible">
-                    <CheckBoxList v-model="scheduleCoordinatorNotificationTypesValue"
-                                  label="Coordinator Notifications"
-                                  help="Empty = none. Selecting any combination toggles only those notifications."
-                                  :items="coordinatorNotificationItems"
-                                  horizontal />
+                          description="Scheduling behavior and check-in access for this group.">
+                <div class="form-group">
+                    <InlineCheckBox v-model="disableScheduling"
+                                    label="Disable Group Member Scheduling" />
                 </div>
+
+                <div class="form-group">
+                    <InlineCheckBox v-model="disableScheduleToolboxAccess"
+                                    label="Hide from Schedule Toolbox" />
+                </div>
+
+                <div class="form-group">
+                    <InlineCheckBox v-model="schedulingMustMeetRequirements"
+                                    label="Require Member Requirements for Scheduling" />
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <DropDownList v-if="groupTypeOptions.isScheduleConfirmationLogicVisible"
+                                      v-model="scheduleConfirmationLogicValue"
+                                      label="Confirmation Behavior"
+                                      :items="scheduleConfirmationLogicItems"
+                                      :showBlankItem="true" />
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <PersonPicker v-if="groupTypeOptions.isScheduleCoordinatorVisible"
+                                      v-model="scheduleCoordinatorPerson"
+                                      label="Schedule Coordinator" />
+                    </div>
+                </div>
+
+                <template v-if="groupTypeOptions.isCoordinatorNotificationsVisible">
+                    <div class="form-group">
+                        <InlineCheckBox v-model="hasCoordinatorNotificationOverride"
+                                        label="Override Coordinator Notifications"
+                                        help="Override the group type's default. When unchecked, this group inherits the group type's notification settings." />
+                    </div>
+
+                    <ConditionalWell v-if="hasCoordinatorNotificationOverride">
+                        <CheckBoxList v-model="scheduleCoordinatorNotificationTypesValue"
+                                      label="Coordinator Notifications"
+                                      help="Select which notifications the coordinator receives. Leave all unchecked to send no notifications for this group."
+                                      :items="coordinatorNotificationItems" />
+                    </ConditionalWell>
+                </template>
 
                 <RadioButtonList v-if="groupTypeOptions.isCheckInRequirementsVisible"
                                  v-model="attendanceRecordRequiredForCheckInValue"
@@ -408,8 +439,8 @@
         <!-- Section 6 - Group Member Attribute Definitions -->
         <!-- ========================== -->
         <ContentSection v-if="canAdministrate && (groupTypeOptions.allowSpecificGroupMemberAttributes || inheritedMemberAttributes.length > 0 || groupMemberAttributes.length > 0)"
-                        title="Group Member Attributes"
-                        description="Per-group attribute definitions used by every member.">
+                        title="Member Attributes"
+                        icon="ti ti-user-cog">
             <GroupMemberAttributes v-model:groupMemberAttributes="groupMemberAttributes"
                                    :inheritedGroupMemberAttributes="inheritedMemberAttributes" />
         </ContentSection>
@@ -434,23 +465,28 @@
                 <RadioButtonList v-model="isChatEnabledOverrideValue"
                                  label="Enable Chat"
                                  :items="triStateOverrideItems"
-                                 horizontal />
+                                 horizontal
+                                 :disabled="isSystem" />
                 <RadioButtonList v-model="isLeavingChatChannelAllowedOverrideValue"
                                  label="Allow Members to Leave Channel"
                                  :items="triStateOverrideItems"
-                                 horizontal />
+                                 horizontal
+                                 :disabled="isSystem" />
                 <RadioButtonList v-model="isChatChannelPublicOverrideValue"
                                  label="Public Channel"
                                  :items="triStateOverrideItems"
-                                 horizontal />
+                                 horizontal
+                                 :disabled="isSystem" />
                 <RadioButtonList v-model="isChatChannelAlwaysShownOverrideValue"
                                  label="Always Show"
                                  :items="triStateOverrideItems"
-                                 horizontal />
+                                 horizontal
+                                 :disabled="isSystem" />
                 <DropDownList v-model="chatPushNotificationModeOverrideValue"
                               label="Push Notification Mode"
                               :items="chatPushNotificationModeItems"
-                              :showBlankItem="true" />
+                              :showBlankItem="true"
+                              :disabled="isSystem" />
 
                 <ImageUploader v-model="chatChannelAvatarBinaryFile"
                                label="Chat Channel Avatar"
@@ -495,7 +531,7 @@
     import { ScheduleType, ScheduleTypeDescription } from "@Obsidian/Enums/Group/scheduleType";
     import { RelationshipStrength, RelationshipStrengthDescription } from "@Obsidian/Enums/Group/relationshipStrength";
     import { ScheduleConfirmationLogic, ScheduleConfirmationLogicDescription } from "@Obsidian/Enums/Group/scheduleConfirmationLogic";
-    import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
+    import { ScheduleCoordinatorNotificationType, ScheduleCoordinatorNotificationTypeDescription } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
     import { AttendanceRecordRequiredForCheckIn, AttendanceRecordRequiredForCheckInDescription } from "@Obsidian/Enums/Group/attendanceRecordRequiredForCheckIn";
     import { ElevatedSecurityLevel, ElevatedSecurityLevelDescription } from "@Obsidian/Enums/Security/elevatedSecurityLevel";
     import { ChatNotificationMode, ChatNotificationModeDescription } from "@Obsidian/Enums/Communication/Chat/chatNotificationMode";
@@ -544,6 +580,7 @@
     import ScheduleBuilder from "@Obsidian/Controls/scheduleBuilder.obs";
     import SchedulePicker from "@Obsidian/Controls/schedulePicker.obs";
     import { combineFlagValues, extractFlagValues, formatPercent, formatTimeValue, intToPercent, nullableInt, parseTimeString, percentToInt, stringToTriState, triStateToString } from "./utils.partial";
+    import { enumToListItemBag } from "@Obsidian/Utility/enumUtils";
 
     const props = defineProps({
         modelValue: {
@@ -581,6 +618,7 @@
 
     const binaryFileTypeDefault = BinaryFiletype.Default;
     const recordSourceDefinedTypeGuid = DefinedTypeGuid.RecordSourceType;
+    const scheduleTypeNone = ScheduleType.None;
     const scheduleTypeWeekly = ScheduleType.Weekly;
     const scheduleTypeCustom = ScheduleType.Custom;
     const scheduleTypeNamed = ScheduleType.Named;
@@ -644,6 +682,7 @@
     const disableScheduleToolboxAccess = propertyRef(props.modelValue.bag?.disableScheduleToolboxAccess ?? false, "DisableScheduleToolboxAccess");
     const scheduleConfirmationLogic = propertyRef<ScheduleConfirmationLogic | null>(props.modelValue.bag?.scheduleConfirmationLogic ?? null, "ScheduleConfirmationLogic");
     const scheduleCoordinatorPerson = propertyRef<ListItemBag | undefined>(props.modelValue.bag?.scheduleCoordinatorPerson ?? undefined, "ScheduleCoordinatorPerson");
+    const hasCoordinatorNotificationOverride = propertyRef(props.modelValue.bag?.hasCoordinatorNotificationOverride ?? false, "HasCoordinatorNotificationOverride");
     const scheduleCoordinatorNotificationTypes = propertyRef<ScheduleCoordinatorNotificationType>(props.modelValue.bag?.scheduleCoordinatorNotificationTypes ?? ScheduleCoordinatorNotificationType.None, "ScheduleCoordinatorNotificationTypes");
     const attendanceRecordRequiredForCheckIn = propertyRef<AttendanceRecordRequiredForCheckIn>(props.modelValue.bag?.attendanceRecordRequiredForCheckIn ?? AttendanceRecordRequiredForCheckIn.ScheduleNotRequired, "AttendanceRecordRequiredForCheckIn");
     const isChatEnabledOverride = propertyRef<boolean | null>(props.modelValue.bag?.isChatEnabledOverride ?? null, "IsChatEnabledOverride");
@@ -669,7 +708,7 @@
         nonLeaderToLeaderRelationshipMultiplierOverride, nonLeaderToNonLeaderRelationshipMultiplierOverride,
         rsvpReminderOffsetDays, rsvpReminderSystemCommunication, scheduleType, weeklyDayOfWeek, weeklyTimeOfDay, iCalendarContent, namedSchedule,
         schedulingMustMeetRequirements, disableScheduling, disableScheduleToolboxAccess,
-        scheduleConfirmationLogic, scheduleCoordinatorPerson, scheduleCoordinatorNotificationTypes, attendanceRecordRequiredForCheckIn,
+        scheduleConfirmationLogic, scheduleCoordinatorPerson, hasCoordinatorNotificationOverride, scheduleCoordinatorNotificationTypes, attendanceRecordRequiredForCheckIn,
         isChatEnabledOverride, isLeavingChatChannelAllowedOverride, isChatChannelPublicOverride,
         isChatChannelAlwaysShownOverride, chatPushNotificationModeOverride, chatChannelAvatarBinaryFile,
         groupMemberAttributes, groupRequirements, groupSyncs, groupMemberWorkflowTriggers, groupLocations];
@@ -928,11 +967,10 @@
         }));
     });
 
-    const coordinatorNotificationItems = computed((): ListItemBag[] => [
-        { value: ScheduleCoordinatorNotificationType.Decline.toString(), text: "Decline" },
-        { value: ScheduleCoordinatorNotificationType.Accept.toString(), text: "Accept" },
-        { value: ScheduleCoordinatorNotificationType.SelfSchedule.toString(), text: "Self-Schedule" }
-    ]);
+    const coordinatorNotificationItems = computed((): ListItemBag[] =>
+        enumToListItemBag(ScheduleCoordinatorNotificationTypeDescription)
+            .filter(i => i.value !== ScheduleCoordinatorNotificationType.None.toString())
+    );
 
     const attendanceRecordRequiredForCheckInItems = computed((): ListItemBag[] => {
         return Object.entries(AttendanceRecordRequiredForCheckInDescription).map(([value, text]) => ({
@@ -1017,6 +1055,7 @@
         updateRefValue(disableScheduleToolboxAccess, props.modelValue.bag?.disableScheduleToolboxAccess ?? false);
         updateRefValue(scheduleConfirmationLogic, props.modelValue.bag?.scheduleConfirmationLogic ?? null);
         updateRefValue(scheduleCoordinatorPerson, props.modelValue.bag?.scheduleCoordinatorPerson ?? undefined);
+        updateRefValue(hasCoordinatorNotificationOverride, props.modelValue.bag?.hasCoordinatorNotificationOverride ?? false);
         updateRefValue(scheduleCoordinatorNotificationTypes, props.modelValue.bag?.scheduleCoordinatorNotificationTypes ?? ScheduleCoordinatorNotificationType.None);
         updateRefValue(attendanceRecordRequiredForCheckIn, props.modelValue.bag?.attendanceRecordRequiredForCheckIn ?? AttendanceRecordRequiredForCheckIn.ScheduleNotRequired);
 
@@ -1097,6 +1136,7 @@
         setPropertiesBoxValue(newValue, "disableScheduleToolboxAccess", disableScheduleToolboxAccess.value);
         setPropertiesBoxValue(newValue, "scheduleConfirmationLogic", scheduleConfirmationLogic.value);
         setPropertiesBoxValue(newValue, "scheduleCoordinatorPerson", scheduleCoordinatorPerson.value);
+        setPropertiesBoxValue(newValue, "hasCoordinatorNotificationOverride", hasCoordinatorNotificationOverride.value);
         setPropertiesBoxValue(newValue, "scheduleCoordinatorNotificationTypes", scheduleCoordinatorNotificationTypes.value);
         setPropertiesBoxValue(newValue, "attendanceRecordRequiredForCheckIn", attendanceRecordRequiredForCheckIn.value);
 

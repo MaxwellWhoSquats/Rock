@@ -1,15 +1,15 @@
 <!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
 <template>
-    <ContentSection v-if="isSectionVisible" title="Requirements">
+    <ContentSection v-if="isSectionVisible" title="Requirements" icon="ti ti-checklist">
         <ContentStack v-if="inheritedGroupRequirements.length > 0"
                       title="Inherited Requirements"
                       description="These requirements are inherited from the group type and apply to this group."
                       headerLocation="top">
             <Grid :data="inheritedGridData" class="inherited-attributes" keyField="guid" itemTerm="Inherited Requirement" light :isFooterHidden="true">
-                <TextColumn name="name" field="name" title="Name" />
-                <TextColumn name="groupRole" field="groupRole" title="Group Role" />
-                <TextColumn name="ageClassification" field="ageClassification" title="Age Classification" />
-                <TextColumn name="inheritedFrom" field="inheritedFromGroupTypeName" title="">
+                <TextColumn name="name" field="name" />
+                <TextColumn name="groupRole" field="groupRole" />
+                <TextColumn name="ageClassification" field="ageClassification" />
+                <TextColumn name="inheritedFrom" field="inheritedFromGroupTypeName">
                     <template #format="{ row }">
                         <template v-if="row.inheritedFromGroupTypeUrl">
                             <span>

@@ -172,6 +172,14 @@
             labels.push({ title: "Public", type: "info" });
         }
 
+        if (bag.isChatEnabled) {
+            labels.push({
+                title: "Chat-Enabled",
+                type: "info",
+                iconCssClass: "ti ti-messages"
+            });
+        }
+
         return labels;
     });
 
@@ -529,6 +537,4 @@
     if (panelMode.value === DetailPanelMode.View && groupViewBag.value?.name && groupViewBag.value?.idKey) {
         addQuickReturn(groupViewBag.value.name, "Groups", 20);
     }
-
-    console.log("panelicon", panelTitleIconCssClass.value);
 </script>

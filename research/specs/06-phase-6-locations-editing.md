@@ -115,7 +115,7 @@ When the modal opens in Edit mode, the default tab should match the row's origin
 
 ### Q6.14. Reorder UI for the locations grid
 
-Neither WebForms nor design includes a reorder UI. WebForms sets `groupLocation.Order` once on Add (to `max(Order) + 1`) and never updates it via drag/drop. **Locked:** no reorder UI. `Order` is set once on Add and stays put. Bag carries `order: number` for completeness but the grid has no `<ReorderColumn>` / drag handle. Adding a reorder UI would expand scope beyond the conversion mandate.
+Neither WebForms nor design includes a reorder UI. WebForms sets `groupLocation.Order` once on Add (to `max(Order) + 1`) and never updates it via drag/drop. **Locked:** no reorder UI. `Order` is assigned server-side on Add and stays put. The bag does not carry `order` — the UI never consumed it and the server overwrites it on every new row anyway, so it was dropped from `GroupLocationStateBag` during Phase 6 polish to shrink the wire payload. Adding a reorder UI would expand scope beyond the conversion mandate.
 
 ## Research coverage
 
@@ -229,7 +229,9 @@ interface GroupLocationStateBag {
     groupLocationTypeValueName?: string | null;
     schedules: ListItemBag[];                               // active only per Q6.3 lock; inactive merged server-side
     groupMemberPersonAliasGuid?: string | null;             // set for Member-tab rows; drives Edit-mode default tab per Q6.13
-    order: number;                                          // set once on Add per Q6.14; no UI reorder
+    // Q6.14 lock: GroupLocation.Order is set once server-side on Add
+    // (max(Order) + 1) and never round-trips through the bag — the UI
+    // does not consume it and the server overwrites it for new rows.
     scheduleConfigs: GroupLocationScheduleConfigBag[];
 }
 
@@ -339,7 +341,7 @@ Populated 2026-05-12 by the implementing model per SESSION-PROTOCOL.md Section C
 | webforms/07-locations-and-schedules.md | `ScheduleService.CanDelete` gate before deletion | ✓ | [GroupDetail.cs:2248](Rock.Blocks/Group/GroupDetail.cs:2248) | IS2 — Phase 3 implementation; Phase 6 wires the call site |
 | webforms/07-locations-and-schedules.md | Duplicate-location detection on Add | ✓ | [locationModal.partial.obs:404](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:404) | L5 + Q6.12 lock |
 | webforms/07-locations-and-schedules.md | Duplicate-location detection on Edit (Q6.12 extension) | ✓ | [locationModal.partial.obs:405](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:405) | Q6.12 lock — Edit excludes `editingGuid` from the comparison set |
-| webforms/07-locations-and-schedules.md | `GroupLocation.Order` set once on Add (max+1) | ✓ | [GroupDetail.cs:3760](Rock.Blocks/Group/GroupDetail.cs:3760) | Q6.14 lock — no UI reorder |
+| webforms/07-locations-and-schedules.md | `GroupLocation.Order` set once on Add (max+1) | ✓ | [GroupDetail.cs:3829](Rock.Blocks/Group/GroupDetail.cs:3829) | Q6.14 lock — no UI reorder. `Order` no longer round-trips through `GroupLocationStateBag`; server is sole authority. |
 | webforms/08-scheduling.md | `IsSchedulingEnabled` flag consumed by capacity matrix gate | ✓ | [locationModal.partial.obs:62](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:62) | Phase 6 only reads this flag; Phase 3 already shipped the scheduling-section save logic |
 | webforms/22-grouptype-cascade.md | Cascade payload extension for Locations: `AllowMultipleLocations`, `LocationTypeValueOptions`, `MapStyleValueGuid` | ✓ | [GroupDetail.cs:2513](Rock.Blocks/Group/GroupDetail.cs:2513) | L12 |
 | webforms/07-locations-and-schedules.md | LocationPicker honors `MapStyleValueGuid` block attribute | ✓ | [locationPicker.obs:31](Rock.JavaScript.Obsidian/Framework/Controls/locationPicker.obs:31), [locationModal.partial.obs:36](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:36) | Framework `<LocationPicker>` extended with an optional `mapStyleValueGuid` prop that forwards to the inner `<GeoPicker>` (Point + Polygon). Backward compatible — when omitted the GeoPicker default applies. Mirrors WebForms parity at `GroupDetail.ascx.cs:3567`. |
@@ -419,5 +421,5 @@ None. All 14 locked decisions (Q6.1-Q6.14) implemented as specified.
 
 ### Commit hash
 
-(Awaiting user commit.)
+`64ba574e26`
 

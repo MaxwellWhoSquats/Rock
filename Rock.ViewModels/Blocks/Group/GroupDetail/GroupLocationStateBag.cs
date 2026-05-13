@@ -110,13 +110,6 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public Guid? GroupMemberPersonAliasGuid { get; set; }
 
         /// <summary>
-        /// Gets or sets the sort order of this <c>GroupLocation</c>.
-        /// Assigned once on Add (max(Order) + 1) per Q6.14; no UI
-        /// reorder.
-        /// </summary>
-        public int Order { get; set; }
-
-        /// <summary>
         /// Gets or sets the per-schedule capacity matrix entries (one
         /// row per selected schedule). Persisted as
         /// <c>GroupLocationScheduleConfig</c> rows owned by the

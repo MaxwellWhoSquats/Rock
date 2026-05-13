@@ -5,9 +5,9 @@
                   description="Member Attributes inherited from this group's Group Type settings."
                   headerLocation="top">
         <Grid :data="inheritedGridData" class="inherited-attributes" keyField="guid" itemTerm="Inherited Attribute" liveUpdates light :isFooterHidden="true">
-            <TextColumn name="name" field="name" title="Attribute" width="15%" />
-            <TextColumn name="description" field="description" title="Description" width="60%" />
-            <TextColumn name="inheritedFrom" field="inheritedFromGroupTypeName" title="Inherited" width="25%">
+            <TextColumn name="name" field="name" width="15%" />
+            <TextColumn name="description" field="description" width="60%" />
+            <TextColumn name="inheritedFrom" field="inheritedFromGroupTypeName" width="25%">
                 <template #format="{ row }">
                     <template v-if="row.inheritedFromGroupTypeUrl">
                         <span>

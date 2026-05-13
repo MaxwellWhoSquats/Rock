@@ -13,7 +13,8 @@
         <TabbedBar v-if="showTabBar"
                    v-model="activeTab"
                    :tabs="tabs"
-                   type="pills" />
+                   type="pills"
+                   class="group-location-tabs mb-4" />
 
         <!-- Member tab body -->
         <div v-if="isMemberTabActive">
@@ -50,10 +51,10 @@
                         :multiple="true" />
 
         <ConditionalWell v-if="isSchedulingEnabled && schedulesValue.length > 0">
-            <p>
+            <NotificationBox :alertType="AlertType.Info">
                 Set the <strong>person capacity</strong> for each of the configured schedules below.
-            </p>
-            <table class="table table-condensed grid-table">
+            </NotificationBox>
+            <table class="capacity-matrix">
                 <thead>
                     <tr>
                         <th></th>
@@ -64,22 +65,28 @@
                 </thead>
                 <tbody>
                     <tr v-for="schedule in schedulesValue" :key="schedule.value ?? ''">
-                        <td class="align-middle">{{ schedule.text }}</td>
+                        <td class="capacity-matrix__name"><strong>{{ schedule.text }}</strong></td>
                         <td>
                             <NumberBox :modelValue="getCapacity(schedule.value, 'min')"
                                        @update:modelValue="v => setCapacity(schedule.value, 'min', v)"
+                                       :validationTitle="`${schedule.text ?? 'Schedule'} (Minimum)`"
+                                       placeholder="0"
                                        :minimumValue="0"
                                        :decimalCount="0" />
                         </td>
                         <td>
                             <NumberBox :modelValue="getCapacity(schedule.value, 'desired')"
                                        @update:modelValue="v => setCapacity(schedule.value, 'desired', v)"
+                                       :validationTitle="`${schedule.text ?? 'Schedule'} (Desired)`"
+                                       placeholder="0"
                                        :minimumValue="0"
                                        :decimalCount="0" />
                         </td>
                         <td>
                             <NumberBox :modelValue="getCapacity(schedule.value, 'max')"
                                        @update:modelValue="v => setCapacity(schedule.value, 'max', v)"
+                                       :validationTitle="`${schedule.text ?? 'Schedule'} (Maximum)`"
+                                       placeholder="0"
                                        :minimumValue="0"
                                        :decimalCount="0" />
                         </td>
@@ -89,6 +96,34 @@
         </ConditionalWell>
     </Modal>
 </template>
+
+<style scoped>
+.group-location-tabs {
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.capacity-matrix {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.capacity-matrix th,
+.capacity-matrix td {
+    border: 0;
+    padding: var(--spacing-xsmall) var(--spacing-small);
+    vertical-align: middle;
+}
+
+.capacity-matrix th {
+    font-weight: var(--font-weight-regular);
+    color: var(--color-interface-strong);
+}
+
+.capacity-matrix__name {
+    white-space: nowrap;
+}
+</style>
 
 <script setup lang="ts">
     import { computed, PropType, ref, watch } from "vue";
@@ -505,7 +540,7 @@
         const editingGuid = props.groupLocation?.guid;
         const candidateLocationGuid = (
             (selectedLocationMode === GroupLocationPickerMode.Named
-             || selectedLocationMode === GroupLocationPickerMode.GroupMember)
+                || selectedLocationMode === GroupLocationPickerMode.GroupMember)
             && selectedLocation && typeof selectedLocation === "object"
             && "value" in selectedLocation
         )
@@ -517,7 +552,7 @@
                 l.guid !== editingGuid &&
                 (
                     (l.selectedLocationMode === GroupLocationPickerMode.Named
-                     || l.selectedLocationMode === GroupLocationPickerMode.GroupMember)
+                        || l.selectedLocationMode === GroupLocationPickerMode.GroupMember)
                     && l.selectedLocation
                     && typeof l.selectedLocation === "object"
                     && "value" in (l.selectedLocation as ListItemBag)
@@ -543,11 +578,29 @@
         const scheduleConfigs: GroupLocationScheduleConfigBag[] = [];
         for (const scheduleGuid of selectedScheduleGuids) {
             const entry = capacityMap.value.get(scheduleGuid);
+            const min = entry?.min ?? null;
+            const desired = entry?.desired ?? null;
+            const max = entry?.max ?? null;
+
+            const scheduleName = schedulesValue.value.find(s => s.value === scheduleGuid)?.text ?? "this schedule";
+            if (min !== null && max !== null && min > max) {
+                errorMessage.value = `Minimum capacity cannot exceed maximum capacity for ${scheduleName}.`;
+                return;
+            }
+            if (min !== null && desired !== null && min > desired) {
+                errorMessage.value = `Minimum capacity cannot exceed desired capacity for ${scheduleName}.`;
+                return;
+            }
+            if (desired !== null && max !== null && desired > max) {
+                errorMessage.value = `Desired capacity cannot exceed maximum capacity for ${scheduleName}.`;
+                return;
+            }
+
             scheduleConfigs.push({
                 scheduleGuid: scheduleGuid as Guid,
-                minimumCapacity: entry?.min ?? null,
-                desiredCapacity: entry?.desired ?? null,
-                maximumCapacity: entry?.max ?? null
+                minimumCapacity: min,
+                desiredCapacity: desired,
+                maximumCapacity: max
             });
         }
 
@@ -563,7 +616,6 @@
             groupLocationTypeValueName: locationTypeBag?.text ?? null,
             schedules: schedulesValue.value,
             groupMemberPersonAliasGuid,
-            order: props.groupLocation.order ?? 0,
             scheduleConfigs
         };
 
