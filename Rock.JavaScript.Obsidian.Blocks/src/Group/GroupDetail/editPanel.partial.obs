@@ -93,7 +93,9 @@
                            v-model="groupCapacity"
                            label="Group Capacity"
                            help="Maximum number of members for this group."
-                           :rules="groupTypeOptions.isGroupCapacityRequired ? 'required' : ''">
+                           :rules="groupTypeOptions.isGroupCapacityRequired ? 'required' : ''"
+                           :minimumValue="0"
+                           :decimalCount="0">
                     <template #append>
                         <span class="input-group-addon">Members</span>
                     </template>
@@ -221,7 +223,8 @@
                            label="RSVP Reminder Lead Time"
                            help="How many days before an event to send the reminder."
                            :disabled="groupTypeOptions.rsvpReminderOffsetDays != null"
-                           :minimumValue="0">
+                           :minimumValue="0"
+                           :decimalCount="0">
                     <template #append>
                         <span class="input-group-addon">Days</span>
                     </template>
@@ -265,14 +268,15 @@
                                 label="Named Schedule" />
             </ContentStack>
 
-            <!-- Stack 2 - Locations placeholder (Phase 6) -->
-            <ContentStack v-if="groupTypeOptions.isSchedulingEnabled"
-                          title="Locations"
-                          description="Where this group meets.">
-                <NotificationBox alertType="info">
-                    Locations editing arrives in Phase 6. The view panel already renders the read-only Meeting Locations card.
-                </NotificationBox>
-            </ContentStack>
+            <!-- Stack 2 - Locations editing (Phase 6) -->
+            <LocationsPanel v-model:groupLocations="groupLocations"
+                            :familyMemberLocationOptions="familyMemberLocationOptions"
+                            :locationSelectionMode="groupTypeOptions.locationSelectionMode"
+                            :locationTypeOptions="groupTypeOptions.locationTypeValueOptions ?? []"
+                            :enableLocationSchedules="groupTypeOptions.enableLocationSchedules"
+                            :isSchedulingEnabled="groupTypeOptions.isSchedulingEnabled"
+                            :allowMultipleLocations="groupTypeOptions.allowMultipleLocations"
+                            :mapStyleValueGuid="groupTypeOptions.mapStyleValueGuid" />
 
             <!-- Stack 3 - Member Scheduling & Check-in -->
             <ContentStack v-if="groupTypeOptions.isSchedulingEnabled || groupTypeOptions.isCheckInRequirementsVisible"
@@ -419,6 +423,7 @@
     import { GroupMemberWorkflowTriggerBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberWorkflowTriggerBag";
     import { GroupRequirementBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupRequirementBag";
     import { GroupSyncBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupSyncBag";
+    import { GroupLocationStateBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLocationStateBag";
     import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
     import { ValidPropertiesBox } from "@Obsidian/ViewModels/Utility/validPropertiesBox";
     import { setPropertiesBoxValue, watchPropertyChanges } from "@Obsidian/Utility/block";
@@ -433,6 +438,7 @@
     import GroupRequirements from "./groupRequirements.partial.obs";
     import GroupSync from "./groupSync.partial.obs";
     import GroupMemberWorkflows from "./groupMemberWorkflows.partial.obs";
+    import LocationsPanel from "./locationsPanel.partial.obs";
     import TextBox from "@Obsidian/Controls/textBox.obs";
     import CheckBox from "@Obsidian/Controls/checkBox.obs";
     import CheckBoxList from "@Obsidian/Controls/checkBoxList.obs";
@@ -562,6 +568,8 @@
     const groupRequirements = propertyRef<GroupRequirementBag[]>(props.modelValue.bag?.groupRequirements ?? [], "GroupRequirements");
     const groupSyncs = propertyRef<GroupSyncBag[]>(props.modelValue.bag?.groupSyncs ?? [], "GroupSyncs");
     const groupMemberWorkflowTriggers = propertyRef<GroupMemberWorkflowTriggerBag[]>(props.modelValue.bag?.groupMemberWorkflowTriggers ?? [], "GroupMemberWorkflowTriggers");
+    const groupLocations = propertyRef<GroupLocationStateBag[]>(props.modelValue.bag?.groupLocations ?? [], "GroupLocations");
+    const familyMemberLocationOptions = computed(() => props.modelValue.bag?.familyMemberLocationOptions ?? []);
 
     // The properties that are being edited. This should only contain
     // objects returned by propertyRef().
@@ -576,7 +584,7 @@
         scheduleConfirmationLogic, scheduleCoordinatorPerson, scheduleCoordinatorNotificationTypes, attendanceRecordRequiredForCheckIn,
         isChatEnabledOverride, isLeavingChatChannelAllowedOverride, isChatChannelPublicOverride,
         isChatChannelAlwaysShownOverride, chatPushNotificationModeOverride, chatChannelAvatarBinaryFile,
-        groupMemberAttributes, groupRequirements, groupSyncs, groupMemberWorkflowTriggers];
+        groupMemberAttributes, groupRequirements, groupSyncs, groupMemberWorkflowTriggers, groupLocations];
 
     // #endregion
 

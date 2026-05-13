@@ -208,12 +208,43 @@ export type GroupTypeOptionsBag = {
     leaderToNonLeaderMultiplierDefault: number;
 
     /**
+     * Gets or sets a value indicating whether more than one
+     * GroupLocation may be added to groups of this type.
+     * Drives the Section 4 Stack 2 grid's Add-button visibility per
+     * WebForms parity at GroupDetail.ascx.cs:3872: the Add
+     * button is shown only when
+     * allowMultipleLocations || locations.length == 0.
+     * Mirrors GroupType.AllowMultipleLocations.
+     */
+    allowMultipleLocations: boolean;
+
+    /**
      * Gets or sets the location-selection mode for the group type.
-     * Phase 6 will use this when wiring up Section 4 Stack 2 (the
-     * Locations grid + dialog); surfaced now so the cascade payload is
-     * complete and Phase 6 does not re-fetch.
+     * Drives the Section 4 Stack 2 visibility (hidden when
+     * None) plus the
+     * &lt;LocationPicker&gt;'s allowedPickerModes
+     * inside the Location modal.
      */
     locationSelectionMode: GroupLocationPickerMode;
+
+    /**
+     * Gets or sets the Location Type DefinedValue dropdown options
+     * scoped to GroupType.LocationTypeValues. Empty when the
+     * group type configures no location types.
+     * ListItemBag.value is the DefinedValue Guid;
+     * ListItemBag.text is the display value.
+     */
+    locationTypeValueOptions?: ListItemBag[] | null;
+
+    /**
+     * Gets or sets the map-style DefinedValue Guid sourced from
+     * the MapStyle block attribute. Carried on this cascade
+     * bag so the LocationPicker inside the modal can render the
+     * admin's configured map style without an extra round-trip on
+     * GroupType change. Mirrors WebForms parity at
+     * GroupDetail.ascx.cs:3567.
+     */
+    mapStyleValueGuid?: Guid | null;
 
     /**
      * Gets or sets the group-type's non-leader-to-leader multiplier

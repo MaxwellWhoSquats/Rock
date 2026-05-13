@@ -30,6 +30,7 @@ using Rock.Model.Groups.Group.Options;
 using Rock.Security;
 using Rock.ViewModels.Blocks;
 using Rock.ViewModels.Blocks.Group.GroupDetail;
+using Rock.ViewModels.Controls;
 using Rock.ViewModels.Utility;
 using Rock.Web;
 using Rock.Web.Cache;
@@ -674,6 +675,10 @@ namespace Rock.Blocks.Group
             bag.GroupRequirements = LoadGroupRequirements( entity );
             bag.GroupSyncs = LoadGroupSyncs( entity );
             bag.GroupMemberWorkflowTriggers = LoadGroupMemberWorkflowTriggers( entity );
+
+            // Section 4 Stack 2 — Phase 6 location payloads.
+            bag.GroupLocations = LoadGroupLocations( entity );
+            bag.FamilyMemberLocationOptions = BuildFamilyMemberLocationOptions( entity );
 
             return bag;
         }
@@ -1447,6 +1452,7 @@ namespace Rock.Blocks.Group
             var addAdministrateSecurity = isNew
                 && GetAttributeValue( AttributeKey.AddAdministrateSecurityToGroupCreator ).AsBoolean();
             var triggersUpdated = false;
+            var checkinDataUpdated = false;
 
             RockContext.WrapTransaction( () =>
             {
@@ -1492,6 +1498,19 @@ namespace Rock.Blocks.Group
                 if ( SaveGroupMemberWorkflowTriggers( entity, box.Bag.GroupMemberWorkflowTriggers ) )
                 {
                     triggersUpdated = true;
+                }
+
+                // Step 4f — Sync per-group Group Locations (Section 4
+                // Stack 2). Encapsulates the GroupLocationScheduleConfig
+                // diff + GroupMemberAssignment cleanup + inactive-
+                // schedule preservation + Location resolution. Mirrors
+                // WebForms GroupDetail.ascx.cs:810-991 (delete-then-
+                // upsert) per Q6.5 lock. Sets checkinDataUpdated when
+                // any GroupLocation change occurred so the post-
+                // transaction KioskDevice.Clear() fires.
+                if ( SaveGroupLocations( entity, box.Bag.GroupLocations ) )
+                {
+                    checkinDataUpdated = true;
                 }
 
                 // Step 5 — Inactive cascade to descendants.
@@ -1542,6 +1561,22 @@ namespace Rock.Blocks.Group
             if ( triggersUpdated )
             {
                 GroupMemberWorkflowTriggerService.RemoveCachedTriggers();
+            }
+
+            // Cache invalidation — KioskDevice cache. Mirrors WebForms
+            // GroupDetail.ascx.cs:1432-1436. Fires when any
+            // GroupLocation change occurred AND the group type takes
+            // attendance (otherwise the kiosk cache is irrelevant).
+            // Re-resolve the group-type cache from the entity since
+            // checkinDataUpdated only matters when the active group
+            // type actually feeds the check-in kiosk surface.
+            if ( checkinDataUpdated )
+            {
+                var groupTypeCacheForKiosk = GetGroupTypeCache( entity );
+                if ( groupTypeCacheForKiosk?.TakesAttendance == true )
+                {
+                    Rock.CheckIn.KioskDevice.Clear();
+                }
             }
 
             // Honor a same-origin ?returnUrl=N if set, mirroring WebForms
@@ -2184,15 +2219,27 @@ namespace Rock.Blocks.Group
 
             if ( scheduleType == ScheduleType.Custom || scheduleType == ScheduleType.Weekly )
             {
-                // Reuse existing inline schedule when present; otherwise
-                // create a new one with Name = string.Empty (the inline
-                // marker per webforms/07).
-                if ( entity.Schedule == null )
+                // Reuse the existing inline schedule when present so
+                // Schedule.Id stays stable across Weekly ↔ Custom switches
+                // (Q6.2-b); otherwise create a new one with Name =
+                // string.Empty (the inline marker per webforms/07).
+                //
+                // The "inline" qualifier matters: when the group was
+                // previously on a Named schedule (entity.Schedule != null
+                // but Name is set), reusing that entity would overwrite a
+                // shared Named schedule's iCal / Weekly fields, corrupting
+                // every other group that points to it. WebForms avoids
+                // this with the hfUniqueScheduleId hidden field
+                // (GroupDetail.ascx.cs:1203-1212) which is only set for
+                // inline schedules; the equivalent here is the
+                // Name == string.Empty check on the loaded navigation.
+                if ( entity.Schedule == null || !string.IsNullOrEmpty( entity.Schedule.Name ) )
                 {
                     entity.Schedule = new Schedule
                     {
                         Name = string.Empty
                     };
+                    entity.ScheduleId = null;
                 }
 
                 if ( scheduleType == ScheduleType.Custom )
@@ -2475,6 +2522,20 @@ namespace Rock.Blocks.Group
             bag.LocationSelectionMode = groupType.LocationSelectionMode;
             bag.EnableLocationSchedules = groupType.EnableLocationSchedules ?? false;
             bag.IsSchedulingEnabled = groupType.IsSchedulingEnabled;
+            bag.AllowMultipleLocations = groupType.AllowMultipleLocations;
+
+            // Phase 6 — Section 4 Stack 2 cascade payload. The Location
+            // Type dropdown sources its options from the group type's
+            // configured LocationTypeValues. The MapStyleValueGuid is
+            // surfaced here so the LocationPicker inside the modal can
+            // honor the admin's configured map style without an extra
+            // round-trip per GroupType change.
+            bag.LocationTypeValueOptions = ( groupType.LocationTypeValues ?? new List<DefinedValueCache>() )
+                .OrderBy( dv => dv.Order )
+                .ThenBy( dv => dv.Value )
+                .ToListItemBagList();
+
+            bag.MapStyleValueGuid = GetAttributeValue( AttributeKey.MapStyle ).AsGuidOrNull();
 
             // Localization.
             bag.AdministratorTerm = groupType.AdministratorTerm.IsNotNullOrWhiteSpace() ? groupType.AdministratorTerm : "Administrator";
@@ -3323,6 +3384,613 @@ namespace Rock.Blocks.Group
                 } );
 
             return true;
+        }
+
+        /// <summary>
+        /// Loads the editable Group Locations for the supplied entity.
+        /// Active schedules only per Q6.3 - inactive schedules attached
+        /// to a GroupLocation never round-trip through the bag; the
+        /// save flow re-merges them server-side. Mirrors WebForms
+        /// <c>GroupLocationsState</c> hydration at
+        /// <c>GroupDetail.ascx.cs:2003</c>.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        private List<GroupLocationStateBag> LoadGroupLocations( Model.Group entity )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                return new List<GroupLocationStateBag>();
+            }
+
+            var groupLocations = new GroupLocationService( RockContext ).Queryable()
+                .AsNoTracking()
+                .Include( gl => gl.Location )
+                .Include( gl => gl.Schedules )
+                .Include( gl => gl.GroupLocationTypeValue )
+                .Include( gl => gl.GroupLocationScheduleConfigs.Select( c => c.Schedule ) )
+                .Include( gl => gl.GroupMemberPersonAlias )
+                .Where( gl => gl.GroupId == entity.Id )
+                .OrderBy( gl => gl.Order )
+                .ThenBy( gl => gl.Id )
+                .ToList();
+
+            return groupLocations.Select( BuildGroupLocationStateBag ).ToList();
+        }
+
+        /// <summary>
+        /// Builds a single <see cref="GroupLocationStateBag"/> from an
+        /// existing <see cref="GroupLocation"/>. The
+        /// <see cref="GroupLocationStateBag.SelectedLocation"/> +
+        /// <see cref="GroupLocationStateBag.SelectedLocationMode"/>
+        /// discriminator is rebuilt from the underlying Location's geo
+        /// state and the GroupMember alias presence per the same four-
+        /// mode classification used by
+        /// <see cref="BuildMeetingLocationBag(GroupLocation, bool, string)"/>.
+        /// Active schedules only per Q6.3.
+        /// </summary>
+        private GroupLocationStateBag BuildGroupLocationStateBag( GroupLocation gl )
+        {
+            var location = gl.Location;
+
+            // Mode classification, in priority order:
+            //   1. GroupMember (the row was added via the Member tab; the
+            //      PersonAlias FK is the discriminator).
+            //   2. Polygon / Point (geo data, unambiguous).
+            //   3. Named (the Location has a Name - the user picked a
+            //      pre-existing Location tree node). Named takes priority
+            //      over Address because Named Locations can carry an
+            //      attached address (e.g., a Building room with a street),
+            //      and the user's original choice was the Name.
+            //   4. Address (no Name; user typed an address).
+            //   5. None (defensive fallback for rows with a null Location;
+            //      should not happen in practice but keeps the hydration
+            //      total).
+            GroupLocationPickerMode mode;
+            object selectedLocation;
+            if ( gl.GroupMemberPersonAliasId.HasValue && location != null )
+            {
+                mode = GroupLocationPickerMode.GroupMember;
+                selectedLocation = new ListItemBag
+                {
+                    Value = location.Guid.ToString(),
+                    Text = location.ToString( false )
+                };
+            }
+            else if ( location?.GeoFence != null )
+            {
+                mode = GroupLocationPickerMode.Polygon;
+                selectedLocation = location.GeoFence.AsText();
+            }
+            else if ( location?.GeoPoint != null )
+            {
+                mode = GroupLocationPickerMode.Point;
+                selectedLocation = location.GeoPoint.AsText();
+            }
+            else if ( location != null && location.Name.IsNotNullOrWhiteSpace() )
+            {
+                mode = GroupLocationPickerMode.Named;
+                selectedLocation = new ListItemBag
+                {
+                    Value = location.Guid.ToString(),
+                    Text = location.ToString( false )
+                };
+            }
+            else if ( location != null && ( location.Street1.IsNotNullOrWhiteSpace() || location.City.IsNotNullOrWhiteSpace() ) )
+            {
+                mode = GroupLocationPickerMode.Address;
+                selectedLocation = new AddressControlBag
+                {
+                    Street1 = location.Street1,
+                    Street2 = location.Street2,
+                    City = location.City,
+                    State = location.State,
+                    Locality = location.County,
+                    PostalCode = location.PostalCode,
+                    Country = location.Country
+                };
+            }
+            else
+            {
+                mode = GroupLocationPickerMode.None;
+                selectedLocation = null;
+            }
+
+            var bag = new GroupLocationStateBag
+            {
+                Guid = gl.Guid,
+                LocationName = location?.ToString( false ) ?? string.Empty,
+                LocationDescription = null,
+                SelectedLocationMode = mode,
+                SelectedLocation = selectedLocation,
+                GroupLocationTypeValueGuid = gl.GroupLocationTypeValue?.Guid,
+                GroupLocationTypeValueName = gl.GroupLocationTypeValue?.Value,
+                GroupMemberPersonAliasGuid = gl.GroupMemberPersonAlias?.Guid,
+                Order = gl.Order,
+                Schedules = ( gl.Schedules ?? new List<Schedule>() )
+                    .Where( s => s.IsActive )
+                    .OrderBy( s => s.Order )
+                    .ThenBy( s => s.Id )
+                    .Select( s => new ListItemBag
+                    {
+                        Value = s.Guid.ToString(),
+                        Text = s.Name.IsNotNullOrWhiteSpace() ? s.Name : s.FriendlyScheduleText
+                    } )
+                    .ToList(),
+                ScheduleConfigs = ( gl.GroupLocationScheduleConfigs ?? new List<GroupLocationScheduleConfig>() )
+                    .Where( c => c.Schedule != null )
+                    .Select( c => new GroupLocationScheduleConfigBag
+                    {
+                        ScheduleGuid = c.Schedule.Guid,
+                        MinimumCapacity = c.MinimumCapacity,
+                        DesiredCapacity = c.DesiredCapacity,
+                        MaximumCapacity = c.MaximumCapacity
+                    } )
+                    .ToList()
+            };
+
+            return bag;
+        }
+
+        /// <summary>
+        /// Builds the Location modal's Member-tab dropdown source per
+        /// Q6.11 - one row per (Group Member, Family, Mapped Address)
+        /// tuple, excluding Previous-type addresses. Mirrors WebForms
+        /// parity at <c>GroupDetail.ascx.cs:3525-3549</c>.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        private List<FamilyMemberLocationBag> BuildFamilyMemberLocationOptions( Model.Group entity )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                return new List<FamilyMemberLocationBag>();
+            }
+
+            var groupMemberService = new GroupMemberService( RockContext );
+            var personService = new PersonService( RockContext );
+
+            var previousLocationTypeGuid = Rock.SystemGuid.DefinedValue.GROUP_LOCATION_TYPE_PREVIOUS.AsGuid();
+
+            var options = new List<FamilyMemberLocationBag>();
+            var seen = new HashSet<(Guid LocationGuid, Guid PersonAliasGuid)>();
+
+            foreach ( var member in groupMemberService.GetByGroupId( entity.Id ) )
+            {
+                if ( member.Person == null )
+                {
+                    continue;
+                }
+
+                var primaryAlias = member.Person.PrimaryAlias;
+                if ( primaryAlias == null )
+                {
+                    continue;
+                }
+
+                foreach ( var family in personService.GetFamilies( member.PersonId ) )
+                {
+                    foreach ( var familyGroupLocation in family.GroupLocations
+                        .Where( l => l.IsMappedLocation
+                            && l.GroupLocationTypeValue != null
+                            && l.GroupLocationTypeValue.Guid != previousLocationTypeGuid
+                            && l.Location != null ) )
+                    {
+                        var key = (familyGroupLocation.Location.Guid, primaryAlias.Guid);
+                        if ( !seen.Add( key ) )
+                        {
+                            continue;
+                        }
+
+                        options.Add( new FamilyMemberLocationBag
+                        {
+                            LocationGuid = familyGroupLocation.Location.Guid,
+                            PersonAliasGuid = primaryAlias.Guid,
+                            Text = $"{member.Person.FullName} {familyGroupLocation.GroupLocationTypeValue.Value} ({familyGroupLocation.Location})"
+                        } );
+                    }
+                }
+            }
+
+            return options;
+        }
+
+        /// <summary>
+        /// Resolves the LocationPicker emit + discriminator pair on a
+        /// <see cref="GroupLocationStateBag"/> to a tracked
+        /// <see cref="Location"/> entity per Q6.9. Routes by
+        /// <see cref="GroupLocationStateBag.SelectedLocationMode"/>:
+        /// <list type="bullet">
+        ///   <item><c>Named</c> / <c>GroupMember</c>: <see cref="ListItemBag"/> Guid lookup.</item>
+        ///   <item><c>Address</c>: <see cref="LocationService.Get(string, string, string, string, string, string, string, string)"/>.</item>
+        ///   <item><c>Point</c> / <c>Polygon</c>: <see cref="LocationService.GetByGeoPoint"/> / <see cref="LocationService.GetByGeoFence"/> with WKT.</item>
+        /// </list>
+        /// Returns null when the bag is missing required data. Persists
+        /// any newly-created Location through the LocationService so
+        /// downstream <c>SaveChanges</c> assigns its <c>Id</c>.
+        /// </summary>
+        private Location ResolveLocationFromBag( GroupLocationStateBag bag, LocationService locationService )
+        {
+            if ( bag?.SelectedLocation == null )
+            {
+                return null;
+            }
+
+            switch ( bag.SelectedLocationMode )
+            {
+                case GroupLocationPickerMode.Named:
+                case GroupLocationPickerMode.GroupMember:
+                {
+                    // The Vue side wraps Named and GroupMember picks as a
+                    // ListItemBag (value = Location.Guid). Round-trip the
+                    // raw payload through ToJson so we accept whatever
+                    // shape System.Text.Json or Newtonsoft handed us.
+                    var listItem = bag.SelectedLocation.ToJson().FromJsonOrNull<ListItemBag>();
+                    var locationGuid = listItem?.Value.AsGuidOrNull();
+                    return locationGuid.HasValue ? locationService.Get( locationGuid.Value ) : null;
+                }
+
+                case GroupLocationPickerMode.Address:
+                {
+                    var address = bag.SelectedLocation.ToJson().FromJsonOrNull<AddressControlBag>();
+                    if ( address == null )
+                    {
+                        return null;
+                    }
+
+                    if ( address.Street1.IsNullOrWhiteSpace() && address.City.IsNullOrWhiteSpace() )
+                    {
+                        return null;
+                    }
+
+                    return locationService.Get(
+                        address.Street1,
+                        address.Street2,
+                        address.City,
+                        address.State,
+                        address.PostalCode,
+                        address.Country,
+                        verifyLocation: false );
+                }
+
+                case GroupLocationPickerMode.Point:
+                {
+                    var wkt = bag.SelectedLocation as string ?? bag.SelectedLocation.ToString();
+                    if ( wkt.IsNullOrWhiteSpace() )
+                    {
+                        return null;
+                    }
+                    System.Data.Entity.Spatial.DbGeography point;
+                    try
+                    {
+                        point = System.Data.Entity.Spatial.DbGeography.FromText( wkt );
+                    }
+                    catch
+                    {
+                        // The picker emits invalid WKT for empty / partial
+                        // selections; treat it as a no-op rather than
+                        // throwing into the save flow.
+                        return null;
+                    }
+                    return point != null ? locationService.GetByGeoPoint( point ) : null;
+                }
+
+                case GroupLocationPickerMode.Polygon:
+                {
+                    var wkt = bag.SelectedLocation as string ?? bag.SelectedLocation.ToString();
+                    if ( wkt.IsNullOrWhiteSpace() )
+                    {
+                        return null;
+                    }
+                    System.Data.Entity.Spatial.DbGeography fence;
+                    try
+                    {
+                        fence = System.Data.Entity.Spatial.DbGeography.PolygonFromText( wkt, System.Data.Entity.Spatial.DbGeography.DefaultCoordinateSystemId );
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                    return fence != null ? locationService.GetByGeoFence( fence ) : null;
+                }
+
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// Persists the Section 4 Stack 2 group locations list inside
+        /// the Save block action's <c>WrapTransaction</c> step 4f. Per
+        /// Q6.5 lock - encapsulates the SyncRelatedEntities pattern +
+        /// <c>GroupLocationScheduleConfig</c> diff
+        /// (existing/modified/new/deleted) +
+        /// <c>GroupMemberAssignment</c> cleanup + inactive-schedule
+        /// preservation (Q6.3) + Location resolution from picker bag
+        /// (Q6.9) as a single atomic unit. Mirrors WebForms parity at
+        /// <c>GroupDetail.ascx.cs:810-991</c>. Returns true when any
+        /// add / update / delete occurred so the caller knows to flush
+        /// <c>KioskDevice</c> post-transaction.
+        /// </summary>
+        /// <param name="entity">The group entity.</param>
+        /// <param name="bags">The location bags from the save payload.</param>
+        private bool SaveGroupLocations( Model.Group entity, List<GroupLocationStateBag> bags )
+        {
+            if ( entity == null || entity.Id == 0 )
+            {
+                // Locations cannot be saved against a group whose Id is
+                // still 0 - the FK requires a persisted parent. The
+                // step-3 SaveChanges in the outer transaction has
+                // already assigned the Id by the time this method runs.
+                return false;
+            }
+
+            var bagList = ( bags ?? new List<GroupLocationStateBag>() ).Where( b => b != null ).ToList();
+            foreach ( var b in bagList.Where( b => b.Guid == Guid.Empty ) )
+            {
+                b.Guid = Guid.NewGuid();
+            }
+
+            var groupLocationService = new GroupLocationService( RockContext );
+            var groupMemberAssignmentService = new GroupMemberAssignmentService( RockContext );
+            var locationService = new LocationService( RockContext );
+            var scheduleService = new ScheduleService( RockContext );
+            var personAliasService = new PersonAliasService( RockContext );
+
+            // Reload the persisted GroupLocations with their navigations so
+            // we can diff against the incoming bags. The entity's
+            // GroupLocations navigation may or may not be hydrated depending
+            // on the code path that loaded the entity.
+            var existingLocations = groupLocationService.Queryable()
+                .Include( gl => gl.Schedules )
+                .Include( gl => gl.GroupLocationScheduleConfigs )
+                .Where( gl => gl.GroupId == entity.Id )
+                .ToList();
+
+            var incomingGuids = bagList.Select( b => b.Guid ).ToHashSet();
+            var changed = false;
+
+            // 1. Delete removed locations - cascade-clean their
+            // GroupLocationScheduleConfigs and any
+            // GroupMemberAssignments that reference (scheduleId,
+            // locationId, groupId).
+            foreach ( var existing in existingLocations.Where( gl => !incomingGuids.Contains( gl.Guid ) ).ToList() )
+            {
+                foreach ( var cfg in existing.GroupLocationScheduleConfigs.ToList() )
+                {
+                    existing.GroupLocationScheduleConfigs.Remove( cfg );
+                }
+
+                foreach ( var schedule in existing.Schedules )
+                {
+                    var assignmentsToDelete = groupMemberAssignmentService.Queryable()
+                        .Where( a => a.ScheduleId == schedule.Id
+                            && a.LocationId == existing.LocationId
+                            && a.GroupMember.GroupId == existing.GroupId )
+                        .ToList();
+                    groupMemberAssignmentService.DeleteRange( assignmentsToDelete );
+                }
+
+                groupLocationService.Delete( existing );
+                changed = true;
+            }
+
+            // Compute the next Order value for any new rows (Q6.14 lock:
+            // Order is assigned once on Add, never via UI reorder).
+            var nextOrder = existingLocations.Any()
+                ? existingLocations.Max( gl => gl.Order ) + 1
+                : 0;
+
+            // 2. Upsert each incoming location.
+            foreach ( var bag in bagList )
+            {
+                var existing = existingLocations.FirstOrDefault( gl => gl.Guid == bag.Guid );
+                var isNewLocation = existing == null;
+                int? oldLocationId = isNewLocation ? null : ( int? ) existing.LocationId;
+
+                if ( isNewLocation )
+                {
+                    existing = new GroupLocation
+                    {
+                        Guid = bag.Guid,
+                        GroupId = entity.Id,
+                        Order = nextOrder++
+                    };
+                    groupLocationService.Add( existing );
+                    existingLocations.Add( existing );
+                }
+
+                // Resolve the LocationPicker bag (Q6.9). Skip the
+                // GroupLocation entirely if the resolver returns null:
+                // the picker hasn't selected a valid location and there
+                // is nothing to persist.
+                var resolvedLocation = ResolveLocationFromBag( bag, locationService );
+                if ( resolvedLocation == null )
+                {
+                    if ( isNewLocation )
+                    {
+                        groupLocationService.Delete( existing );
+                        existingLocations.Remove( existing );
+                    }
+                    continue;
+                }
+
+                // Newly-created Location entities have Id == 0 until
+                // the next SaveChanges. SaveChanges will run at the end
+                // of the outer transaction, so the FK reference works
+                // either way (EF assigns the Id on flush).
+                if ( !isNewLocation && resolvedLocation.Id != existing.LocationId )
+                {
+                    // The user swapped the Location attached to this row.
+                    // Cascade-clean any GroupMemberAssignments that
+                    // referenced the previous (scheduleId, oldLocationId,
+                    // groupId) tuple.
+                    //
+                    // We iterate the currently-attached schedules rather
+                    // than the bag's incoming list — intentionally tighter
+                    // than WebForms parity at GroupDetail.ascx.cs:909-916.
+                    // WebForms only cleans assignments for schedules that
+                    // survive the swap, leaving assignments for removed
+                    // schedules orphaned at the old location. Using the
+                    // currently-attached set catches both in one pass.
+                    foreach ( var schedule in existing.Schedules )
+                    {
+                        var assignmentsToDelete = groupMemberAssignmentService.Queryable()
+                            .Where( a => a.ScheduleId == schedule.Id
+                                && a.LocationId == oldLocationId.Value
+                                && a.GroupMember.GroupId == existing.GroupId )
+                            .ToList();
+                        groupMemberAssignmentService.DeleteRange( assignmentsToDelete );
+                    }
+                }
+
+                // Set the navigation reference; EF resolves LocationId on
+                // flush. When resolvedLocation is newly created its
+                // Location.Id == 0 and assigning LocationId directly
+                // would fail the FK constraint. EF's relationship fix-up
+                // copies the Id from the principal once it is generated.
+                existing.Location = resolvedLocation;
+                if ( resolvedLocation.Id != 0 )
+                {
+                    existing.LocationId = resolvedLocation.Id;
+                }
+
+                // Capture the LocationId that downstream cleanup queries
+                // should target. For a swap to a brand-new Location row
+                // (Id == 0 until EF flushes), no GroupMemberAssignment
+                // can yet reference the unflushed Id, so we treat it as
+                // null and short-circuit the schedule-removal cleanup
+                // below. This avoids relying on the now-stale
+                // existing.LocationId when the conditional scalar
+                // assignment above was skipped.
+                var cleanupLocationId = resolvedLocation.Id != 0
+                    ? ( int? ) resolvedLocation.Id
+                    : null;
+
+                existing.GroupLocationTypeValueId = bag.GroupLocationTypeValueGuid.HasValue
+                    ? DefinedValueCache.GetId( bag.GroupLocationTypeValueGuid.Value )
+                    : null;
+
+                // Resolve the Member-tab PersonAlias if present (Q6.13).
+                existing.GroupMemberPersonAliasId = bag.GroupMemberPersonAliasGuid.HasValue
+                    ? personAliasService.GetSelect( bag.GroupMemberPersonAliasGuid.Value, pa => ( int? ) pa.Id )
+                    : null;
+
+                // 3. Schedule reconciliation (Q6.3) — union active
+                // (bag) + inactive (DB) so previously-attached but now-
+                // inactive schedules are NOT silently dropped.
+                var incomingActiveScheduleGuids = ( bag.Schedules ?? new List<ListItemBag>() )
+                    .Select( s => s.Value.AsGuidOrNull() )
+                    .Where( g => g.HasValue )
+                    .Select( g => g.Value )
+                    .ToHashSet();
+
+                // Detach any currently-attached schedules that the bag
+                // does NOT include and are active (inactive ones survive).
+                var deletedScheduleIds = new List<int>();
+                foreach ( var attached in existing.Schedules.ToList() )
+                {
+                    if ( !attached.IsActive )
+                    {
+                        // Inactive schedules survive bag round-trip per Q6.3.
+                        continue;
+                    }
+
+                    if ( !incomingActiveScheduleGuids.Contains( attached.Guid ) )
+                    {
+                        deletedScheduleIds.Add( attached.Id );
+                        existing.Schedules.Remove( attached );
+                    }
+                }
+
+                // Attach any active schedules the bag introduces that
+                // are not already attached.
+                var currentlyAttachedGuids = existing.Schedules.Select( s => s.Guid ).ToHashSet();
+                foreach ( var newGuid in incomingActiveScheduleGuids.Where( g => !currentlyAttachedGuids.Contains( g ) ) )
+                {
+                    var schedule = scheduleService.Get( newGuid );
+                    if ( schedule != null )
+                    {
+                        existing.Schedules.Add( schedule );
+                    }
+                }
+
+                // 4. GroupLocationScheduleConfig diff
+                // (existing/modified/new/deleted). Mirrors WebForms
+                // parity at GroupDetail.ascx.cs:942-988.
+                var incomingConfigs = bag.ScheduleConfigs ?? new List<GroupLocationScheduleConfigBag>();
+                var incomingByGuid = incomingConfigs
+                    .GroupBy( c => c.ScheduleGuid )
+                    .ToDictionary( g => g.Key, g => g.First() );
+
+                // Resolve Schedule.Guid -> Schedule.Id for the configs.
+                var attachedScheduleByGuid = existing.Schedules.ToDictionary( s => s.Guid, s => s );
+
+                // Drop existing configs not present in the incoming list
+                // (covers schedule removals + capacity-row removals).
+                foreach ( var cfg in existing.GroupLocationScheduleConfigs.ToList() )
+                {
+                    var cfgScheduleGuid = cfg.Schedule?.Guid
+                        ?? attachedScheduleByGuid.FirstOrDefault( kv => kv.Value.Id == cfg.ScheduleId ).Key;
+
+                    if ( cfgScheduleGuid == Guid.Empty || !incomingByGuid.ContainsKey( cfgScheduleGuid ) )
+                    {
+                        existing.GroupLocationScheduleConfigs.Remove( cfg );
+                    }
+                }
+
+                // Upsert each incoming config.
+                foreach ( var incoming in incomingConfigs )
+                {
+                    if ( !attachedScheduleByGuid.TryGetValue( incoming.ScheduleGuid, out var schedule ) )
+                    {
+                        // Capacity row references a schedule that is no
+                        // longer attached; skip it (the schedule was
+                        // removed in the same edit pass).
+                        continue;
+                    }
+
+                    var existingCfg = existing.GroupLocationScheduleConfigs
+                        .FirstOrDefault( c => c.ScheduleId == schedule.Id );
+                    if ( existingCfg == null )
+                    {
+                        existing.GroupLocationScheduleConfigs.Add( new GroupLocationScheduleConfig
+                        {
+                            ScheduleId = schedule.Id,
+                            MinimumCapacity = incoming.MinimumCapacity,
+                            DesiredCapacity = incoming.DesiredCapacity,
+                            MaximumCapacity = incoming.MaximumCapacity
+                        } );
+                    }
+                    else
+                    {
+                        existingCfg.MinimumCapacity = incoming.MinimumCapacity;
+                        existingCfg.DesiredCapacity = incoming.DesiredCapacity;
+                        existingCfg.MaximumCapacity = incoming.MaximumCapacity;
+                    }
+                }
+
+                // 5. GroupMemberAssignment cleanup for schedules removed
+                // from this location (deletedScheduleIds collected above).
+                // Mirrors WebForms parity at GroupDetail.ascx.cs:823-836.
+                // Skipped when cleanupLocationId is null (the swap
+                // landed on a not-yet-flushed Location row, so no
+                // assignments can yet reference it).
+                if ( cleanupLocationId.HasValue )
+                {
+                    foreach ( var deletedScheduleId in deletedScheduleIds )
+                    {
+                        var assignmentsToDelete = groupMemberAssignmentService.Queryable()
+                            .Where( a => a.ScheduleId == deletedScheduleId
+                                && a.LocationId == cleanupLocationId.Value
+                                && a.GroupMember.GroupId == existing.GroupId )
+                            .ToList();
+                        groupMemberAssignmentService.DeleteRange( assignmentsToDelete );
+                    }
+                }
+
+                changed = true;
+            }
+
+            return changed;
         }
 
         /// <summary>

@@ -652,5 +652,34 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public List<GroupMemberWorkflowTriggerBag> GroupMemberWorkflowTriggers { get; set; }
 
         #endregion
+
+        #region Section 4 Stack 2 (Locations editing)
+
+        /// <summary>
+        /// Gets or sets the editable per-group meeting locations
+        /// rendered in the Section 4 Stack 2 grid. Each entry carries
+        /// the Location-picker emit (Q6.9 discriminator), the active
+        /// schedules attached to it (Q6.3 inactive reconciliation runs
+        /// server-side), and the capacity matrix configs. Persisted by
+        /// the Save action's step 4f via the
+        /// <c>SaveGroupLocations</c> helper inside
+        /// <c>WrapTransaction</c>.
+        /// </summary>
+        public List<GroupLocationStateBag> GroupLocations { get; set; }
+
+        /// <summary>
+        /// Gets or sets the per-group dropdown source for the Location
+        /// modal's Member tab. Built server-side via
+        /// <c>BuildFamilyMemberLocationOptions</c> walking
+        /// <c>GroupMemberService.GetByGroupId(groupId) →
+        /// PersonService.GetFamilies(memberId) →
+        /// family.GroupLocations.Where(IsMappedLocation &amp;&amp;
+        /// !Previous)</c>. Per-group (not per-GroupType) so it lives on
+        /// <see cref="GroupBag"/> instead of
+        /// <see cref="GroupTypeOptionsBag"/> per Q6.11.
+        /// </summary>
+        public List<FamilyMemberLocationBag> FamilyMemberLocationOptions { get; set; }
+
+        #endregion
     }
 }

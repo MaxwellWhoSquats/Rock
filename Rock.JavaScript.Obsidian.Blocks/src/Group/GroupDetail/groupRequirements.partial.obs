@@ -36,7 +36,7 @@
                   itemTerm="Group Requirement"
                   liveUpdates
                   light
-                  @addItem="canAddSpecificRequirement ? onAdd : undefined">
+                  :onAddItem="canAddSpecificRequirement ? onAdd : undefined">
                 <TextColumn name="name" field="name" title="Type" />
                 <TextColumn name="groupRole" field="groupRole" title="Group Role" />
                 <TextColumn name="ageClassification" field="ageClassification" title="Age Classification" />

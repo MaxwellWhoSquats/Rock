@@ -1,0 +1,574 @@
+<!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
+<template>
+    <Modal v-model="isVisibleInternal"
+           :title="modalTitle"
+           saveText="Save"
+           cancelText="Cancel"
+           :onSave="onSaveClick">
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">
+            {{ errorMessage }}
+        </NotificationBox>
+
+        <!-- Member / Other tab nav (only when both modes available) -->
+        <TabbedBar v-if="showTabBar"
+                   v-model="activeTab"
+                   :tabs="tabs"
+                   type="pills" />
+
+        <!-- Member tab body -->
+        <div v-if="isMemberTabActive">
+            <NotificationBox v-if="memberOptions.length === 0" :alertType="AlertType.Warning">
+                Add group members first to attach their family addresses to this location.
+            </NotificationBox>
+
+            <DropDownList v-else
+                          v-model="memberValue"
+                          label="Member"
+                          :items="memberItems"
+                          help="Select a member's family address as the meeting location for this group." />
+        </div>
+
+        <!-- Other tab body -->
+        <div v-if="isOtherTabActive">
+            <LocationPicker v-model="otherLocationValue"
+                            v-model:currentPickerMode="otherLocationModeValue"
+                            label="Location"
+                            :allowedPickerModes="otherAllowedPickerModes"
+                            :mapStyleValueGuid="mapStyleValueGuid" />
+        </div>
+
+        <DropDownList v-if="locationTypeItems.length > 0"
+                      v-model="locationTypeValue"
+                      label="Location Type"
+                      :items="locationTypeItems"
+                      showBlankItem
+                      help="Select the type of location for this group meeting." />
+
+        <SchedulePicker v-if="enableLocationSchedules"
+                        v-model="schedulesPickerValue"
+                        label="Location Schedule(s)"
+                        :multiple="true" />
+
+        <ConditionalWell v-if="isSchedulingEnabled && schedulesValue.length > 0">
+            <p>
+                Set the <strong>person capacity</strong> for each of the configured schedules below.
+            </p>
+            <table class="table table-condensed grid-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Minimum</th>
+                        <th>Desired</th>
+                        <th>Maximum</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="schedule in schedulesValue" :key="schedule.value ?? ''">
+                        <td class="align-middle">{{ schedule.text }}</td>
+                        <td>
+                            <NumberBox :modelValue="getCapacity(schedule.value, 'min')"
+                                       @update:modelValue="v => setCapacity(schedule.value, 'min', v)"
+                                       :minimumValue="0"
+                                       :decimalCount="0" />
+                        </td>
+                        <td>
+                            <NumberBox :modelValue="getCapacity(schedule.value, 'desired')"
+                                       @update:modelValue="v => setCapacity(schedule.value, 'desired', v)"
+                                       :minimumValue="0"
+                                       :decimalCount="0" />
+                        </td>
+                        <td>
+                            <NumberBox :modelValue="getCapacity(schedule.value, 'max')"
+                                       @update:modelValue="v => setCapacity(schedule.value, 'max', v)"
+                                       :minimumValue="0"
+                                       :decimalCount="0" />
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </ConditionalWell>
+    </Modal>
+</template>
+
+<script setup lang="ts">
+    import { computed, PropType, ref, watch } from "vue";
+    import Modal from "@Obsidian/Controls/modal.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import ConditionalWell from "@Obsidian/Controls/conditionalWell.obs";
+    import DropDownList from "@Obsidian/Controls/dropDownList.obs";
+    import LocationPicker from "@Obsidian/Controls/locationPicker.obs";
+    import SchedulePicker from "@Obsidian/Controls/schedulePicker.obs";
+    import NumberBox from "@Obsidian/Controls/numberBox.obs";
+    import TabbedBar from "@Obsidian/Controls/tabbedBar.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { GroupLocationPickerMode } from "@Obsidian/Enums/Group/groupLocationPickerMode";
+    import { LocationPickerMode, SingleLocationPickerMode, LocationPickerModeFlag } from "@Obsidian/Enums/Controls/locationPickerMode";
+    import { AddressControlBag } from "@Obsidian/ViewModels/Controls/addressControlBag";
+    import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { GroupLocationStateBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLocationStateBag";
+    import { FamilyMemberLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/familyMemberLocationBag";
+    import { GroupLocationScheduleConfigBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLocationScheduleConfigBag";
+    import { Guid } from "@Obsidian/Types";
+
+    const memberTab = "Member Location";
+    const otherTab = "Other Location";
+
+    const props = defineProps({
+        isVisible: {
+            type: Boolean,
+            default: false
+        },
+        isEditing: {
+            type: Boolean,
+            default: false
+        },
+        groupLocation: {
+            type: Object as PropType<GroupLocationStateBag>,
+            required: true
+        },
+        familyMemberLocationOptions: {
+            type: Array as PropType<FamilyMemberLocationBag[] | null>,
+            default: () => [] as FamilyMemberLocationBag[]
+        },
+        locationSelectionMode: {
+            type: Number as PropType<GroupLocationPickerMode>,
+            default: GroupLocationPickerMode.None
+        },
+        locationTypeOptions: {
+            type: Array as PropType<ListItemBag[] | null>,
+            default: () => [] as ListItemBag[]
+        },
+        enableLocationSchedules: {
+            type: Boolean,
+            default: false
+        },
+        isSchedulingEnabled: {
+            type: Boolean,
+            default: false
+        },
+        mapStyleValueGuid: {
+            type: String as PropType<Guid | null | undefined>,
+            default: null
+        },
+        existingLocations: {
+            type: Array as PropType<GroupLocationStateBag[]>,
+            default: () => [] as GroupLocationStateBag[]
+        }
+    });
+
+    const emit = defineEmits<{
+        (e: "update:isVisible", value: boolean): void;
+        (e: "save", value: GroupLocationStateBag): void;
+    }>();
+
+    // #region Values
+
+    const errorMessage = ref<string | null>(null);
+
+    // Tab state. The Member/Other discriminator is independent of
+    // GroupLocationPickerMode because the user can switch tabs while
+    // editing without committing a new picker mode.
+    const activeTab = ref<string>(memberTab);
+
+    // Member-tab selection: the underlying LocationGuid (the dropdown
+    // value) plus the matching FamilyMemberLocationBag for resolving
+    // PersonAliasGuid + display text on save.
+    const memberValue = ref<string>("");
+
+    // Other-tab LocationPicker state. The picker emits one of three
+    // shapes per its current mode (ListItemBag | AddressControlBag |
+    // WKT string). Track the current mode separately so the parent
+    // can serialize the SelectedLocationMode discriminator.
+    const otherLocationValue = ref<ListItemBag | AddressControlBag | string | undefined>(undefined);
+    const otherLocationModeValue = ref<SingleLocationPickerMode>(LocationPickerMode.Named);
+
+    // Modal-local copies of the editable scalar fields. Initialized
+    // from the incoming groupLocation prop on each show.
+    const locationTypeValue = ref<string>("");
+
+    // SchedulePicker emits ListItemBag | ListItemBag[] | null - we
+    // always render multi-select so the runtime value is ListItemBag[],
+    // but the prop signature includes the single / null cases. Narrow
+    // via a computed accessor when reading the array shape.
+    const schedulesPickerValue = ref<ListItemBag | ListItemBag[] | null>([]);
+
+    const capacityMap = ref<Map<string, { min: number | null; desired: number | null; max: number | null }>>(new Map());
+
+    // #endregion
+
+    // #region Computed Values
+
+    const isVisibleInternal = computed({
+        get(): boolean {
+            return props.isVisible;
+        },
+        set(value: boolean) {
+            emit("update:isVisible", value);
+        }
+    });
+
+    const modalTitle = computed((): string => {
+        return props.isEditing ? "Edit Group Location Schedules" : "Add Group Location Schedules";
+    });
+
+    const memberOptions = computed((): FamilyMemberLocationBag[] => props.familyMemberLocationOptions ?? []);
+
+    /*
+     * Tab visibility per WebForms parity at
+     * GroupDetail.ascx.cs:3494-3515 + Q6.10 lock. Member tab visible
+     * when LocationSelectionMode & GroupMember; Other tab visible when
+     * any of Named / Address / Point / Polygon is allowed.
+     */
+    const isMemberTabAllowed = computed<boolean>(() => {
+        return (props.locationSelectionMode & GroupLocationPickerMode.GroupMember) === GroupLocationPickerMode.GroupMember;
+    });
+
+    const isOtherTabAllowed = computed<boolean>(() => {
+        return (props.locationSelectionMode & (GroupLocationPickerMode.Address | GroupLocationPickerMode.Named | GroupLocationPickerMode.Point | GroupLocationPickerMode.Polygon)) !== 0;
+    });
+
+    const tabs = computed<string[]>(() => {
+        const result: string[] = [];
+        if (isMemberTabAllowed.value) {
+            result.push(memberTab);
+        }
+        if (isOtherTabAllowed.value) {
+            result.push(otherTab);
+        }
+        return result;
+    });
+
+    const showTabBar = computed<boolean>(() => tabs.value.length > 1);
+
+    const isMemberTabActive = computed<boolean>(() => activeTab.value === memberTab && isMemberTabAllowed.value);
+    const isOtherTabActive = computed<boolean>(() => activeTab.value === otherTab && isOtherTabAllowed.value);
+
+    /*
+     * Build the dropdown items with a composite "{locationGuid}|{personAliasGuid}"
+     * value so two group members sharing the same family address remain
+     * distinguishable in the picker. Using LocationGuid alone collides
+     * across siblings. Mirrors WebForms parity at
+     * GroupDetail.ascx.cs:3542 (the "{LocationId}|{PersonId}" pattern).
+     */
+    function buildMemberItemValue(locationGuid: Guid, personAliasGuid: Guid): string {
+        return `${locationGuid}|${personAliasGuid}`;
+    }
+
+    const memberItems = computed((): ListItemBag[] => {
+        return memberOptions.value.map(m => ({
+            value: buildMemberItemValue(m.locationGuid, m.personAliasGuid),
+            text: m.text ?? ""
+        }));
+    });
+
+    const locationTypeItems = computed((): ListItemBag[] => props.locationTypeOptions ?? []);
+
+    /*
+     * Normalize SchedulePicker's polymorphic emit (ListItemBag |
+     * ListItemBag[] | null) to a stable ListItemBag[] for template use.
+     * We always render the picker with :multiple="true", so the runtime
+     * value is the array shape, but TypeScript's view of the prop is
+     * the union.
+     */
+    const schedulesValue = computed<ListItemBag[]>(() => {
+        const v = schedulesPickerValue.value;
+        if (v == null) {
+            return [];
+        }
+        return Array.isArray(v) ? v : [v];
+    });
+
+    /*
+     * Translate GroupLocationPickerMode flags (which include
+     * GroupMember) to the LocationPickerModeFlag bitmask the
+     * <LocationPicker> control consumes. The GroupMember flag drives
+     * the Member tab, not the LocationPicker, so it's masked off.
+     * The bit values for Address / Named / Point / Polygon coincide
+     * (1, 2, 4, 8) between the two enums.
+     */
+    const otherAllowedPickerModes = computed<LocationPickerModeFlag>(() => {
+        const mode = props.locationSelectionMode
+            & (GroupLocationPickerMode.Address | GroupLocationPickerMode.Named | GroupLocationPickerMode.Point | GroupLocationPickerMode.Polygon);
+        return (mode === 0 ? LocationPickerMode.Named : mode) as LocationPickerModeFlag;
+    });
+
+    // #endregion
+
+    // #region Functions
+
+    function getCapacity(scheduleGuid: string | null | undefined, slot: "min" | "desired" | "max"): number | null {
+        const key = (scheduleGuid ?? "").toString();
+        const entry = capacityMap.value.get(key);
+        if (!entry) {
+            return null;
+        }
+        return slot === "min" ? entry.min : slot === "desired" ? entry.desired : entry.max;
+    }
+
+    function setCapacity(scheduleGuid: string | null | undefined, slot: "min" | "desired" | "max", value: number | null): void {
+        const key = (scheduleGuid ?? "").toString();
+        const entry = capacityMap.value.get(key) ?? { min: null, desired: null, max: null };
+        if (slot === "min") {
+            entry.min = value;
+        }
+        else if (slot === "desired") {
+            entry.desired = value;
+        }
+        else {
+            entry.max = value;
+        }
+        // Reassign the map to trigger reactivity.
+        const next = new Map(capacityMap.value);
+        next.set(key, entry);
+        capacityMap.value = next;
+    }
+
+    function hydrateFromGroupLocation(loc: GroupLocationStateBag): void {
+        errorMessage.value = null;
+        locationTypeValue.value = loc.groupLocationTypeValueGuid ?? "";
+        schedulesPickerValue.value = (loc.schedules ?? []).map(s => ({ ...s }));
+
+        // Hydrate the capacity map keyed by Schedule.Guid. Active
+        // schedules only (Q6.3) - inactive entries never round-trip
+        // through the bag.
+        const map = new Map<string, { min: number | null; desired: number | null; max: number | null }>();
+        for (const cfg of loc.scheduleConfigs ?? []) {
+            map.set(cfg.scheduleGuid, {
+                min: cfg.minimumCapacity ?? null,
+                desired: cfg.desiredCapacity ?? null,
+                max: cfg.maximumCapacity ?? null
+            });
+        }
+        capacityMap.value = map;
+
+        // Tab defaulting mirrors WebForms parity at
+        // GroupDetail.ascx.cs:3575-3601:
+        // - Add-mode: prefer Member when the source has data AND the
+        //   Member tab is allowed; fall through to Other otherwise.
+        // - Edit-mode: prefer Member only when this row was originally a
+        //   Member pick AND the source has data AND the Member tab is
+        //   allowed (Q6.13); fall through to Other otherwise.
+        // - Final fallback when only Member is allowed but the source is
+        //   empty: stay on Member with the warning notification (Q6.10).
+        const memberPickedByGuid = loc.groupMemberPersonAliasGuid;
+        const memberTabHasOptions = isMemberTabAllowed.value && memberOptions.value.length > 0;
+        const preferMember = props.isEditing
+            ? (!!memberPickedByGuid && memberTabHasOptions)
+            : memberTabHasOptions;
+
+        if (preferMember) {
+            activeTab.value = memberTab;
+
+            // Match on the composite (Location, Alias) pair so siblings
+            // sharing a family address hydrate to the row that was
+            // actually saved. The dropdown value is keyed the same way.
+            if (memberPickedByGuid) {
+                const match = memberOptions.value.find(m => m.personAliasGuid === memberPickedByGuid);
+                memberValue.value = match
+                    ? buildMemberItemValue(match.locationGuid, match.personAliasGuid)
+                    : "";
+            }
+            else {
+                memberValue.value = "";
+            }
+            otherLocationValue.value = undefined;
+        }
+        else if (isOtherTabAllowed.value) {
+            activeTab.value = otherTab;
+            memberValue.value = "";
+
+            // Map GroupLocationPickerMode -> SingleLocationPickerMode (same bits).
+            const mode = loc.selectedLocationMode;
+            switch (mode) {
+                case GroupLocationPickerMode.Named:
+                    otherLocationModeValue.value = LocationPickerMode.Named;
+                    break;
+                case GroupLocationPickerMode.Address:
+                    otherLocationModeValue.value = LocationPickerMode.Address;
+                    break;
+                case GroupLocationPickerMode.Point:
+                    otherLocationModeValue.value = LocationPickerMode.Point;
+                    break;
+                case GroupLocationPickerMode.Polygon:
+                    otherLocationModeValue.value = LocationPickerMode.Polygon;
+                    break;
+                default:
+                    otherLocationModeValue.value = LocationPickerMode.Named;
+                    break;
+            }
+            otherLocationValue.value = loc.selectedLocation as (ListItemBag | AddressControlBag | string | undefined) ?? undefined;
+        }
+        else {
+            // Only the Member tab is allowed but the source is empty.
+            // Stay on Member so the warning notification renders.
+            activeTab.value = memberTab;
+            memberValue.value = "";
+            otherLocationValue.value = undefined;
+            otherLocationModeValue.value = LocationPickerMode.Named;
+        }
+    }
+
+    // #endregion
+
+    // #region Watchers
+
+    // Hydrate the modal each time it opens. Watch both isVisible and
+    // groupLocation so the user can re-open the same row after editing
+    // without state from the previous edit leaking through.
+    watch(() => [props.isVisible, props.groupLocation] as const, ([visible]) => {
+        if (visible) {
+            hydrateFromGroupLocation(props.groupLocation);
+        }
+    }, { immediate: true, deep: true });
+
+    // #endregion
+
+    // #region Event Handlers
+
+    function onSaveClick(): void {
+        errorMessage.value = null;
+
+        // Tab-specific validation + bag construction.
+        let selectedLocationMode: GroupLocationPickerMode = GroupLocationPickerMode.None;
+        let selectedLocation: unknown = null;
+        let groupMemberPersonAliasGuid: Guid | null = null;
+        let locationDisplayName = "";
+
+        if (isMemberTabActive.value) {
+            if (memberValue.value.length === 0) {
+                errorMessage.value = "Please select a member's family address.";
+                return;
+            }
+            // Split the composite "{locationGuid}|{personAliasGuid}" value so
+            // siblings sharing a family address resolve to the picked row,
+            // not the first one keyed by Location alone.
+            const match = memberOptions.value.find(m =>
+                buildMemberItemValue(m.locationGuid, m.personAliasGuid) === memberValue.value);
+            if (!match) {
+                errorMessage.value = "The selected member address could not be resolved.";
+                return;
+            }
+            selectedLocationMode = GroupLocationPickerMode.GroupMember;
+            selectedLocation = { value: match.locationGuid, text: match.text };
+            groupMemberPersonAliasGuid = match.personAliasGuid;
+            locationDisplayName = match.text ?? "";
+        }
+        else {
+            const v = otherLocationValue.value;
+            if (v === undefined || v === null) {
+                errorMessage.value = "Please select a location.";
+                return;
+            }
+
+            // Translate SingleLocationPickerMode -> GroupLocationPickerMode (same bits).
+            switch (otherLocationModeValue.value) {
+                case LocationPickerMode.Named:
+                    selectedLocationMode = GroupLocationPickerMode.Named;
+                    break;
+                case LocationPickerMode.Address:
+                    selectedLocationMode = GroupLocationPickerMode.Address;
+                    break;
+                case LocationPickerMode.Point:
+                    selectedLocationMode = GroupLocationPickerMode.Point;
+                    break;
+                case LocationPickerMode.Polygon:
+                    selectedLocationMode = GroupLocationPickerMode.Polygon;
+                    break;
+            }
+            selectedLocation = v;
+
+            // Derive a friendly display name for the grid. Named -
+            // pull the picker's text. Address / Point / Polygon - use
+            // a placeholder until the server resolves the row on
+            // reload (the next bag round-trip will overwrite this).
+            if (typeof v === "object" && v !== null && "text" in v) {
+                locationDisplayName = (v as ListItemBag).text ?? "";
+            }
+            else if (selectedLocationMode === GroupLocationPickerMode.Address && v && typeof v === "object") {
+                const a = v as AddressControlBag;
+                locationDisplayName = [a.street1, a.city, a.state].filter(p => p && p.length > 0).join(", ");
+            }
+            else if (typeof v === "string") {
+                locationDisplayName = selectedLocationMode === GroupLocationPickerMode.Polygon
+                    ? "Geo-fenced Location"
+                    : "Pinned Location";
+            }
+        }
+
+        // Duplicate detection (Q6.12 lock) - both Add and Edit. Edit
+        // excludes the row being edited from the comparison set so the
+        // user can save without changing the Location. The duplicate
+        // check is keyed on the persisted LocationGuid where possible,
+        // falling back to the friendly display name when the bag is a
+        // non-Named picker emit (Address / Point / Polygon, which
+        // resolve to Location.Id server-side).
+        const editingGuid = props.groupLocation?.guid;
+        const candidateLocationGuid = (
+            (selectedLocationMode === GroupLocationPickerMode.Named
+             || selectedLocationMode === GroupLocationPickerMode.GroupMember)
+            && selectedLocation && typeof selectedLocation === "object"
+            && "value" in selectedLocation
+        )
+            ? (selectedLocation as ListItemBag).value
+            : null;
+
+        if (candidateLocationGuid) {
+            const duplicate = props.existingLocations.find(l =>
+                l.guid !== editingGuid &&
+                (
+                    (l.selectedLocationMode === GroupLocationPickerMode.Named
+                     || l.selectedLocationMode === GroupLocationPickerMode.GroupMember)
+                    && l.selectedLocation
+                    && typeof l.selectedLocation === "object"
+                    && "value" in (l.selectedLocation as ListItemBag)
+                    && (l.selectedLocation as ListItemBag).value === candidateLocationGuid
+                )
+            );
+            if (duplicate) {
+                errorMessage.value = `${locationDisplayName || "This location"} already exists in meeting details and can not be selected again.`;
+                return;
+            }
+        }
+
+        // Build the capacity-config list. Only emit rows for schedules
+        // that the user actually selected (the map may carry stale
+        // entries from a previous schedule selection during the same
+        // modal session - those drop on save per Q6.4 lock semantics).
+        const selectedScheduleGuids = new Set(
+            schedulesValue.value
+                .map(s => (s.value ?? "").toString())
+                .filter(g => g.length > 0)
+        );
+
+        const scheduleConfigs: GroupLocationScheduleConfigBag[] = [];
+        for (const scheduleGuid of selectedScheduleGuids) {
+            const entry = capacityMap.value.get(scheduleGuid);
+            scheduleConfigs.push({
+                scheduleGuid: scheduleGuid as Guid,
+                minimumCapacity: entry?.min ?? null,
+                desiredCapacity: entry?.desired ?? null,
+                maximumCapacity: entry?.max ?? null
+            });
+        }
+
+        const locationTypeBag = locationTypeItems.value.find(o => o.value === locationTypeValue.value);
+
+        const result: GroupLocationStateBag = {
+            guid: props.groupLocation.guid,
+            locationName: locationDisplayName,
+            locationDescription: null,
+            selectedLocationMode,
+            selectedLocation,
+            groupLocationTypeValueGuid: locationTypeValue.value && locationTypeValue.value.length > 0 ? locationTypeValue.value as Guid : null,
+            groupLocationTypeValueName: locationTypeBag?.text ?? null,
+            schedules: schedulesValue.value,
+            groupMemberPersonAliasGuid,
+            order: props.groupLocation.order ?? 0,
+            scheduleConfigs
+        };
+
+        emit("save", result);
+    }
+
+    // #endregion
+</script>

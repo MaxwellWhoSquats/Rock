@@ -1,0 +1,199 @@
+<!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
+<template>
+    <ContentStack v-if="isStackVisible"
+                  title="Group Location Schedules"
+                  description="Provide the location-specific schedules used for this group.">
+        <Grid :data="gridData"
+              keyField="guid"
+              itemTerm="Group Location"
+              liveUpdates
+              light
+              :onAddItem="canAdd ? onAdd : undefined">
+            <TextColumn name="location" field="location" title="Location" />
+            <TextColumn name="type" field="type" title="Type" />
+            <TextColumn v-if="enableLocationSchedules" name="schedules" field="schedules" title="Schedule(s)" />
+            <EditColumn @click="onEdit" />
+            <DeleteColumn @click="onDelete" />
+        </Grid>
+    </ContentStack>
+
+    <LocationModal v-model:isVisible="isModalVisible"
+                   :isEditing="isEditing"
+                   :groupLocation="theGroupLocation"
+                   :familyMemberLocationOptions="familyMemberLocationOptions"
+                   :locationSelectionMode="locationSelectionMode"
+                   :locationTypeOptions="locationTypeOptions"
+                   :enableLocationSchedules="enableLocationSchedules"
+                   :isSchedulingEnabled="isSchedulingEnabled"
+                   :mapStyleValueGuid="mapStyleValueGuid"
+                   :existingLocations="groupLocations"
+                   @save="onSave" />
+</template>
+
+<script setup lang="ts">
+    import { computed, PropType, ref } from "vue";
+    import Grid, { TextColumn, EditColumn, DeleteColumn } from "@Obsidian/Controls/grid";
+    import ContentStack from "@Obsidian/Controls/contentStack.obs";
+    import LocationModal from "./locationModal.partial.obs";
+    import { GroupLocationPickerMode } from "@Obsidian/Enums/Group/groupLocationPickerMode";
+    import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { GroupLocationStateBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLocationStateBag";
+    import { FamilyMemberLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/familyMemberLocationBag";
+    import { Guid } from "@Obsidian/Types";
+    import { newGuid } from "@Obsidian/Utility/guid";
+
+    const props = defineProps({
+        groupLocations: {
+            type: Array as PropType<GroupLocationStateBag[] | null>,
+            required: true
+        },
+        familyMemberLocationOptions: {
+            type: Array as PropType<FamilyMemberLocationBag[] | null>,
+            default: () => [] as FamilyMemberLocationBag[]
+        },
+        locationSelectionMode: {
+            type: Number as PropType<GroupLocationPickerMode>,
+            default: GroupLocationPickerMode.None
+        },
+        locationTypeOptions: {
+            type: Array as PropType<ListItemBag[] | null>,
+            default: () => [] as ListItemBag[]
+        },
+        enableLocationSchedules: {
+            type: Boolean,
+            default: false
+        },
+        isSchedulingEnabled: {
+            type: Boolean,
+            default: false
+        },
+        allowMultipleLocations: {
+            type: Boolean,
+            default: true
+        },
+        mapStyleValueGuid: {
+            type: String as PropType<Guid | null | undefined>,
+            default: null
+        }
+    });
+
+    const emit = defineEmits<{
+        (e: "update:groupLocations", value: GroupLocationStateBag[]): void
+    }>();
+
+    // #region Values
+
+    const theGroupLocation = ref<GroupLocationStateBag>(createNewGroupLocation());
+    const isModalVisible = ref(false);
+    const isEditing = ref(false);
+
+    // #endregion
+
+    // #region Computed Values
+
+    const groupLocations = computed({
+        get(): GroupLocationStateBag[] {
+            return props.groupLocations ?? [];
+        },
+        set(value: GroupLocationStateBag[]) {
+            emit("update:groupLocations", value);
+        }
+    });
+
+    /*
+     * Section 4 Stack 2 visibility mirrors WebForms parity at
+     * GroupDetail.ascx.cs:2245-2255: hidden when
+     * LocationSelectionMode == None. The Add-button visibility (canAdd)
+     * is a separate gate that mirrors the Add button at
+     * GroupDetail.ascx.cs:3872 - shown only when
+     * allowMultipleLocations || locations.length === 0.
+     */
+    const isStackVisible = computed<boolean>(() => {
+        return props.locationSelectionMode !== GroupLocationPickerMode.None;
+    });
+
+    const canAdd = computed<boolean>(() => {
+        return props.allowMultipleLocations || groupLocations.value.length === 0;
+    });
+
+    const gridData = computed(() => {
+        return {
+            rows: groupLocations.value.map(l => ({
+                guid: l.guid,
+                location: l.locationName ?? "",
+                type: l.groupLocationTypeValueName ?? "",
+                schedules: (l.schedules ?? []).map(s => s.text ?? "").join(", ")
+            }))
+        };
+    });
+
+    // #endregion
+
+    // #region Functions
+
+    function createNewGroupLocation(): GroupLocationStateBag {
+        return {
+            guid: "",
+            locationName: "",
+            locationDescription: null,
+            selectedLocationMode: GroupLocationPickerMode.None,
+            selectedLocation: null,
+            groupLocationTypeValueGuid: null,
+            groupLocationTypeValueName: null,
+            schedules: [],
+            groupMemberPersonAliasGuid: null,
+            order: 0,
+            scheduleConfigs: []
+        };
+    }
+
+    // #endregion
+
+    // #region Event Handlers
+
+    function onAdd(): void {
+        isEditing.value = false;
+        theGroupLocation.value = createNewGroupLocation();
+        isModalVisible.value = true;
+    }
+
+    function onEdit(guid: string): void {
+        const selected = groupLocations.value.find(l => l.guid === guid);
+        if (!selected) {
+            return;
+        }
+        // Deep-clone so in-progress edits don't mutate the row until Save.
+        theGroupLocation.value = {
+            ...selected,
+            schedules: [...(selected.schedules ?? [])],
+            scheduleConfigs: (selected.scheduleConfigs ?? []).map(c => ({ ...c }))
+        };
+        isEditing.value = true;
+        isModalVisible.value = true;
+    }
+
+    function onDelete(guid: string): void {
+        groupLocations.value = groupLocations.value.filter(l => l.guid !== guid);
+    }
+
+    function onSave(value: GroupLocationStateBag): void {
+        const current = groupLocations.value;
+        const idx = current.findIndex(l => l.guid === value.guid);
+        if (idx !== -1) {
+            const updated = [...current];
+            updated.splice(idx, 1, value);
+            groupLocations.value = updated;
+        }
+        else {
+            value.guid = newGuid();
+            // Order is assigned once on Add per Q6.14 lock. The server
+            // re-computes max(Order) + 1 on save, so the UI value here
+            // is informational.
+            value.order = (current.length > 0 ? Math.max(...current.map(l => l.order ?? 0)) : -1) + 1;
+            groupLocations.value = [...current, value];
+        }
+        isModalVisible.value = false;
+    }
+
+    // #endregion
+</script>

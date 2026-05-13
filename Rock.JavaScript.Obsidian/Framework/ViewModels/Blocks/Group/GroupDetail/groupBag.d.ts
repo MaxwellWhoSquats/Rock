@@ -29,9 +29,11 @@ import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/sched
 import { ScheduleType } from "@Obsidian/Enums/Group/scheduleType";
 import { ElevatedSecurityLevel } from "@Obsidian/Enums/Security/elevatedSecurityLevel";
 import { Guid } from "@Obsidian/Types";
+import { FamilyMemberLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/familyMemberLocationBag";
 import { GroupAdministratorBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupAdministratorBag";
 import { GroupDetailGroupTypeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailGroupTypeBag";
 import { GroupLinkagesBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLinkagesBag";
+import { GroupLocationStateBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLocationStateBag";
 import { GroupMeetingLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMeetingLocationBag";
 import { GroupMemberWorkflowTriggerBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberWorkflowTriggerBag";
 import { GroupRequirementBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupRequirementBag";
@@ -78,6 +80,30 @@ export type GroupBag = {
 
     /** Gets or sets the attribute values. */
     attributeValues?: Record<string, string> | null;
+
+    /**
+     * Gets or sets the per-group dropdown source for the Location
+     * modal's Member tab. Built server-side via
+     * BuildFamilyMemberLocationOptions walking
+     * GroupMemberService.GetByGroupId(groupId) →
+     * PersonService.GetFamilies(memberId) →
+     * family.GroupLocations.Where(IsMappedLocation &amp;&amp;
+     * !Previous). Per-group (not per-GroupType) so it lives on
+     * GroupBag instead of GroupTypeOptionsBag per Q6.11.
+     */
+    familyMemberLocationOptions?: FamilyMemberLocationBag[] | null;
+
+    /**
+     * Gets or sets the editable per-group meeting locations
+     * rendered in the Section 4 Stack 2 grid. Each entry carries
+     * the Location-picker emit (Q6.9 discriminator), the active
+     * schedules attached to it (Q6.3 inactive reconciliation runs
+     * server-side), and the capacity matrix configs. Persisted by
+     * the Save action's step 4f via the
+     * SaveGroupLocations helper inside
+     * WrapTransaction.
+     */
+    groupLocations?: GroupLocationStateBag[] | null;
 
     /**
      * Gets or sets the campus selected on the General section's

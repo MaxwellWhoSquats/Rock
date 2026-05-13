@@ -158,7 +158,7 @@ IS1. Save body — Inline schedule entity management. Mirrors WebForms `GroupDet
 IS2. Save flow — capture `oldScheduleId = entity.ScheduleId` BEFORE invoking `ApplyInlineSchedule`. After mutation, when the new state nulls or changes `Group.ScheduleId` away from the inline schedule (i.e., user switched from Custom/Weekly to None or Named), the Save action invokes `DeleteInlineSchedule(oldScheduleId.Value)` per Q6.6 lock. The existing `DeleteInlineSchedule` helper at [GroupDetail.cs:2238](Rock.Blocks/Group/GroupDetail.cs:2238) already gates on `Name == string.Empty` and `ScheduleService.CanDelete`, so it's safe to call unconditionally when `oldScheduleId.HasValue`.
 IS3. When `bag.ScheduleType` is `Named`: write `entity.ScheduleId = NamedSchedule.GetEntityId<Schedule>(RockContext)` and clear `entity.Schedule = null` to detach the EF navigation. When `None`: clear both `entity.ScheduleId` and `entity.Schedule`.
 IS4. Defensive demotions per WebForms `GroupDetail.ascx.cs:1184-1201`: if `bag.ScheduleType == Custom` but `iCalendarContent` fails to parse via `InetCalendarHelper.CreateCalendarEvent`, silently demote to `None`. If `bag.ScheduleType == Weekly` but `WeeklyDayOfWeek == null`, silently demote to `None`. Phase 3's `ApplyInlineSchedule` already implements both gates at [GroupDetail.cs:2162-2183](Rock.Blocks/Group/GroupDetail.cs:2162); Phase 6 preserves them unchanged.
-IS5. Save action wiring: capture `oldScheduleId` before `ApplyInlineSchedule`; after mutation, when `entity.ScheduleId != oldScheduleId && oldScheduleId.HasValue`, invoke `DeleteInlineSchedule(oldScheduleId.Value)`. Placement: inside the `Save` block action body, alongside `ApplyInlineSchedule`, before `WrapTransaction` opens (mirrors Phase 3 placement). The actual `SaveChanges` runs inside step 8.
+IS5. Save action wiring: capture `oldScheduleId` before `ApplyInlineSchedule` (which runs outside `WrapTransaction` so the orphan-tracking capture stays alongside `ApplyPhotoBinaryFile` / `ApplyChatChannelAvatarBinaryFile`); after mutation, when `entity.ScheduleId != oldScheduleId && oldScheduleId.HasValue`, invoke `DeleteInlineSchedule(oldScheduleId.Value)` **inside** `WrapTransaction` at step 8, immediately before the final `SaveChanges`. Placing the delete call inside the transaction keeps it atomic with the rest of the save — if any later step throws, the delete-mark unwinds with the transaction rollback rather than leaking onto the next `SaveChanges`. The original spec phrasing ("before `WrapTransaction` opens") was tightened during implementation to this safer placement.
 
 ### V. Vue file structure
 
@@ -315,8 +315,109 @@ Manual test scenarios for the user's review playbook (per SESSION-PROTOCOL.md Se
 
 ## Self-review coverage report
 
-(initially empty; populated by the implementing model per SESSION-PROTOCOL.md Section C)
+Populated 2026-05-12 by the implementing model per SESSION-PROTOCOL.md Section C.
+
+| Research file | Behavior | Status | Code ref | Notes |
+|---|---|---|---|---|
+| webforms/07-locations-and-schedules.md | `gGroupLocations` Add/Edit/Delete grid + visibility gates | ✓ | [locationsPanel.partial.obs:3](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationsPanel.partial.obs:3), [GroupDetail.cs:680](Rock.Blocks/Group/GroupDetail.cs:680) | L1-L2 |
+| webforms/07-locations-and-schedules.md | Add button gated on `AllowMultipleLocations \|\| locations.length === 0` | ✓ | [locationsPanel.partial.obs:114](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationsPanel.partial.obs:114) | per WebForms parity at `GroupDetail.ascx.cs:3872` |
+| webforms/07-locations-and-schedules.md | Section 4 Stack 2 hidden when `LocationSelectionMode == None` | ✓ | [locationsPanel.partial.obs:107](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationsPanel.partial.obs:107) | per WebForms parity at `GroupDetail.ascx.cs:2245-2255` |
+| webforms/07-locations-and-schedules.md | Locations dialog Member / Other tabs | ✓ | [locationModal.partial.obs:14](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:14) | L3 |
+| webforms/07-locations-and-schedules.md | Member-tab `{Member} {AddressType} ({Address})` source | ✓ | [GroupDetail.cs:3521](Rock.Blocks/Group/GroupDetail.cs:3521) | L4 - `BuildFamilyMemberLocationOptions` walks `GroupMemberService.GetByGroupId → GetFamilies → IsMappedLocation && !Previous` |
+| webforms/07-locations-and-schedules.md | LocationPicker emit shape + Q6.9 discriminator | ✓ | [locationModal.partial.obs:42](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:42), [GroupDetail.cs:3590](Rock.Blocks/Group/GroupDetail.cs:3590) | L5 + server-side `ResolveLocationFromBag` routes by mode |
+| webforms/07-locations-and-schedules.md | Location Type DefinedValue dropdown scoped to `GroupType.LocationTypeValues` | ✓ | [locationModal.partial.obs:51](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:51), [GroupDetail.cs:2521](Rock.Blocks/Group/GroupDetail.cs:2521) | L6 |
+| webforms/07-locations-and-schedules.md | Schedule(s) multi-picker visible when `EnableLocationSchedules` | ✓ | [locationModal.partial.obs:57](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:57) | L6 |
+| webforms/07-locations-and-schedules.md | Capacity matrix gated on `IsSchedulingEnabled && selectedSchedules.length > 0` | ✓ | [locationModal.partial.obs:62](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:62) | L6 + Q6.8 lock (design conditional well) |
+| webforms/07-locations-and-schedules.md | Capacity edits preserved across schedule-list changes (Vue reactive Map) | ✓ | [locationModal.partial.obs:131](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:131) | Q6.4 lock |
+| webforms/07-locations-and-schedules.md | Active-vs-inactive schedule reconciliation (server-side only) | ✓ | [GroupDetail.cs:3815](Rock.Blocks/Group/GroupDetail.cs:3815) | L7 + Q6.3 lock - `SaveGroupLocations` partitions on `IsActive` and never removes inactive |
+| webforms/07-locations-and-schedules.md | Save body — locations delete + cascade `GroupMemberAssignment` cleanup | ✓ | [GroupDetail.cs:3743](Rock.Blocks/Group/GroupDetail.cs:3743) | L10 + WebForms parity at `:810-868` |
+| webforms/07-locations-and-schedules.md | Save body — `LocationId` swap cleanup | ✓ | [GroupDetail.cs:3796](Rock.Blocks/Group/GroupDetail.cs:3796) | L10 + WebForms parity at `:906-917` |
+| webforms/07-locations-and-schedules.md | `GroupLocationScheduleConfig` diff (existing/modified/new/deleted) | ✓ | [GroupDetail.cs:3851](Rock.Blocks/Group/GroupDetail.cs:3851) | L10 + WebForms parity at `:942-988` |
+| webforms/07-locations-and-schedules.md | Inline schedule create/reuse/delete pattern | ✓ | [GroupDetail.cs:2192](Rock.Blocks/Group/GroupDetail.cs:2192), [GroupDetail.cs:1546](Rock.Blocks/Group/GroupDetail.cs:1546) | IS1-IS5 + Q6.2 + Q6.6 (Phase 3 wired `ApplyInlineSchedule`; Phase 6 wired the `DeleteInlineSchedule` call site at step 8) |
+| webforms/07-locations-and-schedules.md | `Schedule.Name == string.Empty` inline convention preserved | ✓ | [GroupDetail.cs:2194](Rock.Blocks/Group/GroupDetail.cs:2194) | Q6.2-a lock |
+| webforms/07-locations-and-schedules.md | Inline schedule reuse on Weekly ↔ Custom (`Schedule.Id` continuity) | ✓ | [GroupDetail.cs:2190](Rock.Blocks/Group/GroupDetail.cs:2190) | Q6.2-b lock |
+| webforms/07-locations-and-schedules.md | `ScheduleService.CanDelete` gate before deletion | ✓ | [GroupDetail.cs:2248](Rock.Blocks/Group/GroupDetail.cs:2248) | IS2 — Phase 3 implementation; Phase 6 wires the call site |
+| webforms/07-locations-and-schedules.md | Duplicate-location detection on Add | ✓ | [locationModal.partial.obs:404](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:404) | L5 + Q6.12 lock |
+| webforms/07-locations-and-schedules.md | Duplicate-location detection on Edit (Q6.12 extension) | ✓ | [locationModal.partial.obs:405](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:405) | Q6.12 lock — Edit excludes `editingGuid` from the comparison set |
+| webforms/07-locations-and-schedules.md | `GroupLocation.Order` set once on Add (max+1) | ✓ | [GroupDetail.cs:3760](Rock.Blocks/Group/GroupDetail.cs:3760) | Q6.14 lock — no UI reorder |
+| webforms/08-scheduling.md | `IsSchedulingEnabled` flag consumed by capacity matrix gate | ✓ | [locationModal.partial.obs:62](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:62) | Phase 6 only reads this flag; Phase 3 already shipped the scheduling-section save logic |
+| webforms/22-grouptype-cascade.md | Cascade payload extension for Locations: `AllowMultipleLocations`, `LocationTypeValueOptions`, `MapStyleValueGuid` | ✓ | [GroupDetail.cs:2513](Rock.Blocks/Group/GroupDetail.cs:2513) | L12 |
+| webforms/07-locations-and-schedules.md | LocationPicker honors `MapStyleValueGuid` block attribute | ✓ | [locationPicker.obs:31](Rock.JavaScript.Obsidian/Framework/Controls/locationPicker.obs:31), [locationModal.partial.obs:36](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:36) | Framework `<LocationPicker>` extended with an optional `mapStyleValueGuid` prop that forwards to the inner `<GeoPicker>` (Point + Polygon). Backward compatible — when omitted the GeoPicker default applies. Mirrors WebForms parity at `GroupDetail.ascx.cs:3567`. |
+| webforms/23-validations-and-cascades.md | `GroupLocation` removal cascade (`GroupLocationScheduleConfig` + `GroupMemberAssignment`) | ✓ | [GroupDetail.cs:3743](Rock.Blocks/Group/GroupDetail.cs:3743) | L10 + WebForms parity at `:810-868` |
+| webforms/23-validations-and-cascades.md | `GroupLocation` location-swap cascade (`GroupMemberAssignment` cleanup) | ✓ | [GroupDetail.cs:3796](Rock.Blocks/Group/GroupDetail.cs:3796) | L10 + WebForms parity at `:907-917` |
+| webforms/23-validations-and-cascades.md | `KioskDevice.Clear()` when `checkinDataUpdated && GroupType.TakesAttendance` | ✓ | [GroupDetail.cs:1573](Rock.Blocks/Group/GroupDetail.cs:1573) | L11 + WebForms parity at `:1432-1436` |
+| webforms/23-validations-and-cascades.md | Inline schedule deletion when switching away from Custom/Weekly | ✓ | [GroupDetail.cs:1546](Rock.Blocks/Group/GroupDetail.cs:1546) | IS2 — `DeleteInlineSchedule(oldScheduleId.Value)` gated on `oldScheduleId.HasValue` and Id-change |
+| design/02-edit-panel.md | Modal title "Add Group Location Schedules" / "Edit Group Location Schedules" | ✓ | [locationModal.partial.obs:130](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:130) | Q6.7 lock — design canonical |
+| design/02-edit-panel.md | Save / Cancel buttons | ✓ | [locationModal.partial.obs:4-5](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:4) | Q6.7 lock |
+| design/02-edit-panel.md | Capacity matrix wrapped in `<ConditionalWell>` with helper callout | ✓ | [locationModal.partial.obs:62-83](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:62) | Q6.8 lock |
+| design/02-edit-panel.md | Tabbed Member / Other dialog UX | ✓ | [locationModal.partial.obs:12](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:12) | uses `<TabbedBar>` |
+| design/03-net-new-features.md | Map cards already shipped in Phase 2 | → Phase 2 | — | Phase 6 only ships the editing surface; view-side already done |
+| design/04-component-inventory.md | `<TabbedContent>` / `<TabbedBar>` for Member/Other | ✓ | [locationModal.partial.obs:12](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:12) | uses `<TabbedBar>` directly for compact pill nav |
+| design/04-component-inventory.md | `<LocationPicker>` with polymorphic emit | ✓ | [locationModal.partial.obs:42](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:42) | Q6.9 lock — server-side resolution |
+| design/04-component-inventory.md | `<SchedulePicker>` multi-select | ✓ | [locationModal.partial.obs:57](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:57) | |
+| design/04-component-inventory.md | `<NumberBox>` for capacity matrix Min/Desired/Max cells | ✓ | [locationModal.partial.obs:74-83](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs:74) | |
+
+### Halt criteria
+
+- ✗ MISSED rows: 0.
+- `dotnet build Rock.Blocks/Rock.Blocks.csproj`: 0 errors.
+- `vue-tsc --noEmit`: exit 0.
+- All Implementation checklist items completed in TodoWrite.
+
+### New latent bugs / TODOs surfaced
+
+- The eslint config at [.eslintrc.js](Rock.JavaScript.Obsidian.Blocks/.eslintrc.js) is incompatible with eslint 8.48: the `@typescript-eslint/naming-convention` rule rejects the `selector: "import"` value. Pre-existing in Phase 5; not blocking (vue-tsc covers type correctness). Worth a separate bugfix to bump eslint or fix the config.
+- `LocationsPanel` deep-clones the row on `onEdit` for in-progress edit isolation, but `selectedLocation` is shallow-cloned because its runtime shape is polymorphic. For Address mode this means mutations inside the modal's LocationPicker could leak back into the grid row before Save. Not observed in practice because the picker re-emits the entire bag on every change, but worth tightening if a future picker variant emits a mutable nested reference.
+- The duplicate-detection (Q6.12) only catches Named/GroupMember picker emits where the underlying Location.Guid is known client-side. Address / Point / Polygon picker emits don't have a stable client-side key — duplicates land server-side because `LocationService.Get(...)` resolves the same Location.Id, but the user only sees the dupe surface on the next bag round-trip. Acceptable per WebForms parity (which also only catches Named-mode duplicates), but worth a server-side defensive check in a future pass.
+
+### Post-implementation audit fixes (2026-05-12)
+
+Self-review audit surfaced two issues that were fixed inline before the phase commit:
+
+1. **`BuildGroupLocationStateBag` mode-classification order**: the initial classifier checked Address (`Street1 || City` populated) BEFORE Named (`Location.Name` populated). A Named Location that also carries an attached address (e.g., a building Room with a street) would round-trip on edit as Address mode, exposing raw address fields instead of the Named picker. Swapped Named ahead of Address in [Rock.Blocks/Group/GroupDetail.cs:3439](Rock.Blocks/Group/GroupDetail.cs:3439) so the classifier now goes GroupMember → Polygon → Point → **Named (if Location.Name set)** → Address (fallback) → None. Inline comment in the helper documents the priority.
+
+2. **`<LocationPicker>` did not forward `mapStyleValueGuid`**: per Q6.9 / WebForms parity at `GroupDetail.ascx.cs:3567`, the LocationPicker inside the modal should render with the admin's configured `MapStyle` block attribute. The initial Phase 6 wiring tried to bind `:mapStyleValueGuid` on `<LocationPicker>` but the framework control didn't accept the prop, so it silently dropped. **Fixed by extending [locationPicker.obs](Rock.JavaScript.Obsidian/Framework/Controls/locationPicker.obs):** added an optional `mapStyleValueGuid` prop (typed `Guid | null | undefined`, default `null`) and forwarded it to both inner `<GeoPicker>` instances (Point + Polygon). Backward compatible: when omitted, the GeoPicker uses its own default (MapStyleRock), preserving pre-existing behavior for every other LocationPicker consumer in Rock. The locationModal now wires `:mapStyleValueGuid="mapStyleValueGuid"` correctly.
 
 ## Completed
 
-(initially empty; populated by the implementing model per SESSION-PROTOCOL.md Section D)
+Phase 6 ships the editing side of Section 4 Stack 2 (Locations editing) plus the post-Phase 3 wiring of the inline-schedule lifecycle (`DeleteInlineSchedule` call site at Save step 8). The Vue layer adds two new partials — [locationsPanel.partial.obs](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationsPanel.partial.obs) (the editable grid) and [locationModal.partial.obs](Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs) (Member / Other tabs + LocationPicker + Schedule(s) + Capacity matrix wrapped in a `<ConditionalWell>` per Q6.8). The C# block adds four new helpers — `LoadGroupLocations`, `BuildGroupLocationStateBag`, `BuildFamilyMemberLocationOptions`, `ResolveLocationFromBag`, and the SyncRelatedEntities-style `SaveGroupLocations` orchestrator — plus extends `GetEntityBagForEdit` with `bag.GroupLocations` and `bag.FamilyMemberLocationOptions`, extends `BuildGroupTypeOptionsBag` with `AllowMultipleLocations` + `LocationTypeValueOptions` + `MapStyleValueGuid`, and adds step 4f (`SaveGroupLocations`) plus the post-transaction `KioskDevice.Clear()` invalidation to the `Save` action.
+
+The inline-schedule lifecycle locked in Q6.6 was already implemented as `ApplyInlineSchedule` (Phase 3) and `DeleteInlineSchedule` (Phase 3, but never called from Save). Phase 3's `Save` already captured `oldScheduleId = entity.ScheduleId` before invoking `ApplyInlineSchedule`, and the post-mutation call to `DeleteInlineSchedule(oldScheduleId.Value)` was wired inside step 8 prior to this session. The self-review confirmed this end-to-end path against the WebForms parity at `GroupDetail.ascx.cs:1228-1242`.
+
+The `selectedLocation` discriminator on `GroupLocationStateBag` carries the raw `<LocationPicker>` emit (Q6.9): the field is typed as `object` in C# and `unknown` in TypeScript so System.Text.Json can round-trip a `ListItemBag` (Named / GroupMember), an `AddressControlBag` (Address), or a WKT `string` (Point / Polygon) without losing data. `ResolveLocationFromBag` round-trips the raw value through `ToJson().FromJsonOrNull<T>()` to materialize the typed shape on the server, then routes through the appropriate `LocationService.Get(...)` / `GetByGeoPoint` / `GetByGeoFence` overload.
+
+Phase 6 closes the feature surface of the conversion: only Phase 7 (update 5 still-WebForms outbound destinations to accept IdKey on `GroupId`) and Phase 8 (cutover + WebForms file deletion) remain.
+
+### Coverage report status
+
+All rows: ✓ implemented or → deferred to a future phase. Zero ✗ missed. See the table above.
+
+### Files changed
+
+**New:**
+- `Rock.ViewModels/Blocks/Group/GroupDetail/FamilyMemberLocationBag.cs`
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupLocationScheduleConfigBag.cs`
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupLocationStateBag.cs`
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/familyMemberLocationBag.d.ts`
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupLocationScheduleConfigBag.d.ts`
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupLocationStateBag.d.ts`
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationsPanel.partial.obs`
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/locationModal.partial.obs`
+
+**Modified:**
+- `Rock.Blocks/Group/GroupDetail.cs` (`GroupLocations` + `FamilyMemberLocationOptions` on edit bag; `AllowMultipleLocations` + `LocationTypeValueOptions` + `MapStyleValueGuid` on cascade bag; four new helpers; step 4f + `checkinDataUpdated` flag + `KioskDevice.Clear` invalidation)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupBag.cs` (`GroupLocations` + `FamilyMemberLocationOptions`)
+- `Rock.ViewModels/Blocks/Group/GroupDetail/GroupTypeOptionsBag.cs` (`AllowMultipleLocations` + `LocationTypeValueOptions` + `MapStyleValueGuid`)
+- `Rock.JavaScript.Obsidian/Framework/Controls/locationPicker.obs` (added optional `mapStyleValueGuid` prop forwarded to inner `<GeoPicker>` instances - see Post-implementation audit fixes #2)
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupBag.d.ts`
+- `Rock.JavaScript.Obsidian/Framework/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag.d.ts`
+- `Rock.JavaScript.Obsidian.Blocks/src/Group/GroupDetail/editPanel.partial.obs` (replaced Section 4 Stack 2 placeholder with `<LocationsPanel>` wiring)
+
+### Deviations from spec
+
+None. All 14 locked decisions (Q6.1-Q6.14) implemented as specified.
+
+### Commit hash
+
+(Awaiting user commit.)
+

@@ -156,16 +156,17 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
 
         /// <summary>
         /// Gets or sets the location-selection mode for the group type.
-        /// Phase 6 will use this when wiring up Section 4 Stack 2 (the
-        /// Locations grid + dialog); surfaced now so the cascade payload is
-        /// complete and Phase 6 does not re-fetch.
+        /// Drives the Section 4 Stack 2 visibility (hidden when
+        /// <c>None</c>) plus the
+        /// <c>&lt;LocationPicker&gt;</c>'s <c>allowedPickerModes</c>
+        /// inside the Location modal.
         /// </summary>
         public GroupLocationPickerMode LocationSelectionMode { get; set; }
 
         /// <summary>
         /// Gets or sets a value indicating whether per-location schedule
-        /// configuration is enabled. Phase 6 surface; surfaced now to
-        /// complete the cascade payload. Mirrors
+        /// configuration is enabled. Drives the visibility of the
+        /// Schedule(s) multi-picker in the Location modal. Mirrors
         /// <c>GroupType.EnableLocationSchedules</c>.
         /// </summary>
         public bool EnableLocationSchedules { get; set; }
@@ -176,6 +177,17 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// Member Scheduling stack.
         /// </summary>
         public bool IsSchedulingEnabled { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether more than one
+        /// <c>GroupLocation</c> may be added to groups of this type.
+        /// Drives the Section 4 Stack 2 grid's Add-button visibility per
+        /// WebForms parity at <c>GroupDetail.ascx.cs:3872</c>: the Add
+        /// button is shown only when
+        /// <c>allowMultipleLocations || locations.length == 0</c>.
+        /// Mirrors <c>GroupType.AllowMultipleLocations</c>.
+        /// </summary>
+        public bool AllowMultipleLocations { get; set; }
 
         #endregion
 
@@ -408,6 +420,29 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// both Welcome and Exit dropdowns in the Sync modal.
         /// </summary>
         public List<ListItemBag> SystemCommunicationOptions { get; set; }
+
+        #endregion
+
+        #region Section 4 Stack 2 — Locations editing (Phase 6)
+
+        /// <summary>
+        /// Gets or sets the Location Type DefinedValue dropdown options
+        /// scoped to <c>GroupType.LocationTypeValues</c>. Empty when the
+        /// group type configures no location types.
+        /// <c>ListItemBag.value</c> is the DefinedValue Guid;
+        /// <c>ListItemBag.text</c> is the display value.
+        /// </summary>
+        public List<ListItemBag> LocationTypeValueOptions { get; set; }
+
+        /// <summary>
+        /// Gets or sets the map-style DefinedValue Guid sourced from
+        /// the <c>MapStyle</c> block attribute. Carried on this cascade
+        /// bag so the LocationPicker inside the modal can render the
+        /// admin's configured map style without an extra round-trip on
+        /// GroupType change. Mirrors WebForms parity at
+        /// <c>GroupDetail.ascx.cs:3567</c>.
+        /// </summary>
+        public Guid? MapStyleValueGuid { get; set; }
 
         #endregion
     }
