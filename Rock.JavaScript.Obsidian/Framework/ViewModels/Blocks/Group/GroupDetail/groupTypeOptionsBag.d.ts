@@ -291,10 +291,18 @@ export type GroupTypeOptionsBag = {
     /**
      * Gets or sets the group-type's pinned RSVP reminder system
      * communication. Non-null means the group-type pins this value
-     * and the per-group override is read-only. Null means the group
-     * can override.
+     * and the per-group override is read-only; the ListItemBag.text
+     * is shown as the readonly label. Null means the group can
+     * override.
      */
-    rsvpReminderSystemCommunicationGuid?: Guid | null;
+    rsvpReminderSystemCommunication?: ListItemBag | null;
+
+    /**
+     * Gets or sets the list of system communications in the RSVP
+     * Confirmation category. Populates the per-group dropdown when
+     * the group-type does not pin the value.
+     */
+    rsvpSystemCommunicationOptions?: ListItemBag[] | null;
 
     /**
      * Gets or sets the list of DefinedValue rows under

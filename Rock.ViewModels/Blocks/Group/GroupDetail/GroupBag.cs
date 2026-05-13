@@ -431,12 +431,14 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public int? RsvpReminderOffsetDays { get; set; }
 
         /// <summary>
-        /// Gets or sets the RSVP reminder system communication Guid
-        /// override. Null = inherit from group type's pinned value
-        /// (read-only when the group type pins it). Resolved server-side
-        /// to <c>Group.RSVPReminderSystemCommunicationId</c>.
+        /// Gets or sets the RSVP reminder system communication override.
+        /// <c>ListItemBag.value</c> is the SystemCommunication Guid;
+        /// <c>ListItemBag.text</c> is the communication title. Null =
+        /// inherit from group type's pinned value (read-only when the
+        /// group type pins it). Resolved server-side to
+        /// <c>Group.RSVPReminderSystemCommunicationId</c>.
         /// </summary>
-        public Guid? RsvpReminderSystemCommunicationGuid { get; set; }
+        public ListItemBag RsvpReminderSystemCommunication { get; set; }
 
         #endregion
 

@@ -639,9 +639,7 @@ namespace Rock.Blocks.Group
 
             // Section 3 — RSVP.
             bag.RsvpReminderOffsetDays = entity.RSVPReminderOffsetDays;
-            bag.RsvpReminderSystemCommunicationGuid = entity.RSVPReminderSystemCommunicationId.HasValue
-                ? new SystemCommunicationService( RockContext ).GetSelect( entity.RSVPReminderSystemCommunicationId.Value, c => ( Guid? ) c.Guid )
-                : null;
+            bag.RsvpReminderSystemCommunication = BuildSystemCommunicationListItem( entity.RSVPReminderSystemCommunicationId );
 
             // Section 4 Stack 1 — Inline Schedule.
             HydrateScheduleFields( bag, entity );
@@ -828,31 +826,53 @@ namespace Rock.Blocks.Group
                 }
             } );
 
-            // Peer Network overrides (S13) — only when the group type
+            // Peer Network overrides (S13) - only when the group type
             // enables peer-network AND the user checks the override box.
+            // When the user opts to override but selects None as the strength,
+            // the growth flag and matrix multipliers must also be nulled so
+            // stale UI state from a previously chosen non-None strength does
+            // not leak through.
             box.IfValidProperty( nameof( box.Bag.OverrideRelationshipStrength ), () =>
             {
                 var isPeerNetworkEnabled = groupType?.IsPeerNetworkEnabled == true;
-
-                if ( isPeerNetworkEnabled && box.Bag.OverrideRelationshipStrength )
+                if ( !isPeerNetworkEnabled )
                 {
-                    entity.RelationshipStrengthOverride = ( int? ) ( box.Bag.RelationshipStrengthOverride ?? RelationshipStrength.None );
-                    entity.RelationshipGrowthEnabledOverride = box.Bag.RelationshipGrowthEnabledOverride;
-
-                    entity.LeaderToLeaderRelationshipMultiplierOverride = box.Bag.LeaderToLeaderRelationshipMultiplierOverride;
-                    entity.LeaderToNonLeaderRelationshipMultiplierOverride = box.Bag.LeaderToNonLeaderRelationshipMultiplierOverride;
-                    entity.NonLeaderToLeaderRelationshipMultiplierOverride = box.Bag.NonLeaderToLeaderRelationshipMultiplierOverride;
-                    entity.NonLeaderToNonLeaderRelationshipMultiplierOverride = box.Bag.NonLeaderToNonLeaderRelationshipMultiplierOverride;
+                    return;
                 }
-                else if ( isPeerNetworkEnabled )
+
+                var bagStrength = box.Bag.RelationshipStrengthOverride ?? RelationshipStrength.None;
+                var isStrengthOverridden = box.Bag.OverrideRelationshipStrength
+                    && bagStrength != RelationshipStrength.None;
+
+                if ( box.Bag.OverrideRelationshipStrength )
                 {
+                    // User wants an override; persist the chosen strength
+                    // (which may legitimately be None).
+                    entity.RelationshipStrengthOverride = ( int ) bagStrength;
+                }
+                else
+                {
+                    // No override at all; fall back to group type default.
                     entity.RelationshipStrengthOverride = null;
-                    entity.RelationshipGrowthEnabledOverride = null;
-                    entity.LeaderToLeaderRelationshipMultiplierOverride = null;
-                    entity.LeaderToNonLeaderRelationshipMultiplierOverride = null;
-                    entity.NonLeaderToLeaderRelationshipMultiplierOverride = null;
-                    entity.NonLeaderToNonLeaderRelationshipMultiplierOverride = null;
                 }
+
+                // Growth and the matrix only apply when a non-None strength
+                // is actively overridden.
+                entity.RelationshipGrowthEnabledOverride = isStrengthOverridden
+                    ? box.Bag.RelationshipGrowthEnabledOverride
+                    : null;
+                entity.LeaderToLeaderRelationshipMultiplierOverride = isStrengthOverridden
+                    ? box.Bag.LeaderToLeaderRelationshipMultiplierOverride
+                    : null;
+                entity.LeaderToNonLeaderRelationshipMultiplierOverride = isStrengthOverridden
+                    ? box.Bag.LeaderToNonLeaderRelationshipMultiplierOverride
+                    : null;
+                entity.NonLeaderToLeaderRelationshipMultiplierOverride = isStrengthOverridden
+                    ? box.Bag.NonLeaderToLeaderRelationshipMultiplierOverride
+                    : null;
+                entity.NonLeaderToNonLeaderRelationshipMultiplierOverride = isStrengthOverridden
+                    ? box.Bag.NonLeaderToNonLeaderRelationshipMultiplierOverride
+                    : null;
             } );
 
             // RSVP overrides (S14) — null out per group type pinning.
@@ -870,15 +890,13 @@ namespace Rock.Blocks.Group
                 }
             } );
 
-            box.IfValidProperty( nameof( box.Bag.RsvpReminderSystemCommunicationGuid ), () =>
+            box.IfValidProperty( nameof( box.Bag.RsvpReminderSystemCommunication ), () =>
             {
                 if ( groupType?.EnableRSVP == true )
                 {
                     entity.RSVPReminderSystemCommunicationId = groupType.RSVPReminderSystemCommunicationId.HasValue
                         ? ( int? ) null
-                        : ( box.Bag.RsvpReminderSystemCommunicationGuid.HasValue
-                            ? new SystemCommunicationService( RockContext ).GetSelect( box.Bag.RsvpReminderSystemCommunicationGuid.Value, c => ( int? ) c.Id )
-                            : null );
+                        : box.Bag.RsvpReminderSystemCommunication?.GetEntityId<SystemCommunication>( RockContext );
                 }
                 else
                 {
@@ -2551,11 +2569,8 @@ namespace Rock.Blocks.Group
 
             // RSVP pinned values (group-type wins; null = group can override).
             bag.RsvpReminderOffsetDays = groupType.RSVPReminderOffsetDays;
-            if ( groupType.RSVPReminderSystemCommunicationId.HasValue )
-            {
-                bag.RsvpReminderSystemCommunicationGuid = new SystemCommunicationService( RockContext )
-                    .GetSelect( groupType.RSVPReminderSystemCommunicationId.Value, c => ( Guid? ) c.Guid );
-            }
+            bag.RsvpSystemCommunicationOptions = BuildRsvpSystemCommunicationOptions();
+            bag.RsvpReminderSystemCommunication = BuildSystemCommunicationListItem( groupType.RSVPReminderSystemCommunicationId );
 
             // Status defined values.
             if ( groupType.GroupStatusDefinedTypeId.HasValue )
@@ -2580,12 +2595,7 @@ namespace Rock.Blocks.Group
             {
                 bag.InactiveReasons = new GroupTypeService( RockContext )
                     .GetInactiveReasonsForGroupType( groupType.Id )
-                    .Select( dv => new ListItemBag
-                    {
-                        Value = dv.Id.ToString(),
-                        Text = dv.Value
-                    } )
-                    .ToList();
+                    .ToListItemBagList();
             }
 
             // Inherited group-member attribute definitions (Section 6 read-only grid).
@@ -2943,6 +2953,46 @@ namespace Rock.Blocks.Group
                     Value = c.Guid.ToString(),
                     Text = c.Title
                 } )
+                .ToList();
+        }
+
+        /// <summary>
+        /// Builds a <see cref="ListItemBag"/> for a single SystemCommunication
+        /// by Id. Returns null when the id is null or the row is missing.
+        /// Used to hydrate the per-group RSVP reminder selection and the
+        /// group-type's pinned readonly label.
+        /// </summary>
+        /// <param name="systemCommunicationId">The system communication Id.</param>
+        private ListItemBag BuildSystemCommunicationListItem( int? systemCommunicationId )
+        {
+            if ( !systemCommunicationId.HasValue )
+            {
+                return null;
+            }
+
+            return new SystemCommunicationService( RockContext )
+                .Queryable()
+                .Where( c => c.Id == systemCommunicationId.Value )
+                .Select( c => new ListItemBag { Value = c.Guid.ToString(), Text = c.Title } )
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Builds the SystemCommunication dropdown options filtered to the
+        /// RSVP Confirmation category. Mirrors WebForms
+        /// <c>CreateSystemCommunicationDropDownLists</c> at
+        /// <c>GroupDetail.ascx.cs:3036</c>, which populates the
+        /// <c>ddlRsvpReminderSystemCommunication</c> dropdown from that
+        /// single category.
+        /// </summary>
+        private List<ListItemBag> BuildRsvpSystemCommunicationOptions()
+        {
+            var rsvpCategoryGuid = Rock.SystemGuid.Category.SYSTEM_COMMUNICATION_RSVP_CONFIRMATION.AsGuid();
+
+            return new SystemCommunicationService( RockContext ).Queryable()
+                .Where( c => c.Category.Guid == rsvpCategoryGuid )
+                .OrderBy( c => c.Title )
+                .Select( c => new ListItemBag { Value = c.Guid.ToString(), Text = c.Title } )
                 .ToList();
         }
 

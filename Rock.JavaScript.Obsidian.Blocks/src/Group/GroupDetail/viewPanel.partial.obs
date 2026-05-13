@@ -9,7 +9,7 @@
                      heading="Role Limit Warning "
                      v-html="modelValue.roleLimitWarning" />
 
-    <div class="row">
+    <div class="row p-spacing-sm">
         <div class="col-md-7">
             <ContentSection title="Overview" icon="ti ti-list-details" :disableCollapse="true">
                 <img v-if="modelValue?.photoUrl"
@@ -120,7 +120,7 @@
         </div>
 
         <div class="col-md-5">
-            <div class="d-flex flex-column gap-3">
+            <div class="d-flex flex-column" style="gap: 30px;">
                 <ContentSection v-if="hasGroupTools"
                                 title="Group Tools"
                                 icon="ti ti-tool"

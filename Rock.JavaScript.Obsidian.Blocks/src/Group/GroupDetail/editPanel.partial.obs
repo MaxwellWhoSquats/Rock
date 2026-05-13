@@ -1,214 +1,281 @@
 <!-- Copyright by the Spark Development Network; Licensed under the Rock Community License -->
 <template>
-    <fieldset>
+    <ContentSectionContainer>
         <NotificationBox v-if="errorMessage" alertType="danger" v-html="errorMessage" />
 
         <!-- ========================== -->
         <!-- Section 1 - Top fields -->
         <!-- ========================== -->
-        <ContentSection title="Group Details" description="The basic identity of the group.">
-            <ContentStack title="Name and Description" description="A clear name and a short description help members find and recognize the group.">
-                <TextBox v-model="name"
-                         label="Name"
-                         rules="required"
-                         :maxLength="100" />
+        <ContentSection light>
+            <div class="basic-fields">
+                <div class="row">
+                    <div class="col-md-6">
+                        <TextBox v-model="name" label="Name" rules="required" :maxLength="100" />
+                    </div>
 
-                <TextBox v-model="description"
-                         label="Description"
-                         textMode="multiline"
-                         :rows="4" />
-
-                <CheckBox v-model="isActive"
-                          label="Active"
-                          help="Inactive groups are hidden from most lists and tools." />
+                    <div class="col-md-6">
+                        <CheckBox v-model="isActive" label="Active" />
+                    </div>
+                </div>
 
                 <ConditionalWell v-if="!isActive">
                     <DropDownList v-if="groupTypeOptions.isInactiveReasonVisible"
                                   v-model="inactiveReasonValueIdValue"
                                   label="Inactive Reason"
+                                  help="The reason this group is inactive."
                                   :items="inactiveReasonItems"
                                   :rules="groupTypeOptions.isInactiveReasonRequired ? 'required' : ''" />
 
                     <TextBox v-model="inactiveReasonNote"
                              label="Inactive Note"
                              textMode="multiline"
+                             help="Additional context about why this group is inactive."
                              :rows="3" />
 
-                    <CheckBox v-if="hasChildGroups"
-                              v-model="inactivateChildGroups"
-                              label="Also Inactivate Child Groups"
-                              help="When checked, all active descendants are marked inactive on save." />
+                    <div class="form-group">
+                        <InlineCheckBox v-if="hasChildGroups"
+                                        v-model="inactivateChildGroups"
+                                        label="Also Inactivate Child Groups"
+                                        help="When checked, all active descendants are marked inactive on save." />
+                    </div>
                 </ConditionalWell>
 
-                <CheckBox v-model="isPublic" label="Show Publicly" />
-            </ContentStack>
+                <TextBox v-model="description"
+                         label="Description"
+                         textMode="multiline"
+                         :rows="4" />
 
-            <ContentStack title="Group Image" description="A 16:9 image used as the hero on the view panel.">
+                <div class="form-group">
+                    <InlineCheckBox v-model="isPublic" label="Show Publicly" />
+                </div>
+
                 <ImageUploader v-model="photoBinaryFile"
                                label="Image"
                                :binaryFileTypeGuid="binaryFileTypeDefault" />
-            </ContentStack>
+            </div>
         </ContentSection>
 
         <!-- ========================== -->
         <!-- Section 2 - General -->
         <!-- ========================== -->
-        <ContentSection title="General"
-                        description="Type, hierarchy, capacity, security, and peer-network behavior.">
-
+        <ContentSection title="General" icon="ti ti-settings">
             <!-- Stack 1 - Overview -->
-            <ContentStack title="Overview" description="Group type, parent, campus, and status.">
-                <DropDownList v-if="isAddMode"
-                              v-model="groupTypeIdValue"
-                              label="Group Type"
-                              :items="allowedGroupTypeItems"
-                              rules="required"
-                              :showBlankItem="true" />
-                <StaticFormControl v-else
-                                   label="Group Type"
-                                   :modelValue="modelValue.bag?.groupType?.name ?? ''" />
+            <ContentStack title="Overview" description="Basic information that identifies this group and places it within the organization.">
+                <div class="row">
+                    <div class="col-md-6">
+                        <DropDownList v-if="isAddMode"
+                                      v-model="groupTypeIdValue"
+                                      label="Group Type"
+                                      :items="allowedGroupTypeItems"
+                                      rules="required"
+                                      :showBlankItem="true" />
 
-                <GroupPicker v-model="parentGroup"
-                             label="Parent Group" />
+                        <div v-else class="static-compact">
+                            <StaticFormControl label="Group Type"
+                                               :modelValue="modelValue.bag?.groupType?.name ?? ''" />
+                        </div>
+                    </div>
+                </div>
 
-                <CampusPicker v-model="campus"
-                              label="Campus"
-                              :includeInactive="!preventSelectingInactiveCampus"
-                              :rules="groupTypeOptions.requiresCampus ? 'required' : ''" />
+                <div class="row">
+                    <div class="col-md-6">
+                        <GroupPicker v-model="parentGroup"
+                                     label="Parent Group" />
+                    </div>
+                </div>
 
-                <DropDownList v-if="groupTypeOptions.isStatusVisible"
-                              v-model="statusValueIdValue"
-                              label="Status"
-                              :items="statusItems" />
+                <div class="row">
+                    <div class="col-md-6">
+                        <CampusPicker v-model="campus"
+                                      label="Campus"
+                                      :includeInactive="!preventSelectingInactiveCampus"
+                                      :rules="groupTypeOptions.requiresCampus ? 'required' : ''" />
+                    </div>
+                </div>
+
+                <div v-if="groupTypeOptions.isStatusVisible" class="row">
+                    <div class="col-md-6">
+                        <DropDownList v-model="statusValueIdValue"
+                                      label="Status"
+                                      :items="statusItems" />
+                    </div>
+                </div>
             </ContentStack>
 
             <!-- Stack 2 - Administration & Security -->
-            <ContentStack title="Administration &amp; Security" description="Administrator, capacity, signature document, record source, and security role.">
-                <PersonPicker v-if="groupTypeOptions.isAdministratorVisible"
-                              v-model="groupAdministrator"
-                              :label="groupTypeOptions.administratorTerm || 'Administrator'"
-                              :trailblazerField="true" />
+            <ContentStack title="Administration &amp; Security" description="Administrative, capacity, and security settings that control how this group is managed.">
+                <div v-if="groupTypeOptions.isAdministratorVisible" class="row">
+                    <div class="col-md-6">
+                        <PersonPicker v-model="groupAdministrator"
+                                      :label="groupTypeOptions.administratorTerm || 'Group Administrator'"
+                                      :trailblazerField="true" />
+                    </div>
+                </div>
 
-                <NumberBox v-if="groupTypeOptions.isGroupCapacityVisible"
-                           v-model="groupCapacity"
-                           label="Group Capacity"
-                           help="Maximum number of members for this group."
-                           :rules="groupTypeOptions.isGroupCapacityRequired ? 'required' : ''"
-                           :minimumValue="0"
-                           :decimalCount="0">
-                    <template #append>
-                        <span class="input-group-addon">Members</span>
-                    </template>
-                </NumberBox>
+                <div v-if="groupTypeOptions.isGroupCapacityVisible" class="row">
+                    <div class="col-md-6">
+                        <NumberBox v-model="groupCapacity"
+                                   label="Group Capacity"
+                                   help="Maximum number of members for this group."
+                                   :rules="groupTypeOptions.isGroupCapacityRequired ? 'required' : ''"
+                                   :minimumValue="0"
+                                   :decimalCount="0">
+                            <template #inputGroupAppend>
+                                <span class="input-group-addon">Members</span>
+                            </template>
+                        </NumberBox>
+                    </div>
+                </div>
 
-                <DropDownList v-model="requiredSignatureDocumentTemplateIdValue"
-                              label="Required Signature Document"
-                              :items="signatureDocumentTemplateItems"
-                              :showBlankItem="true"
-                              :trailblazerField="true" />
+                <div class="row">
+                    <div class="col-md-6">
+                        <DropDownList v-model="requiredSignatureDocumentTemplateIdValue"
+                                      label="Required Signature Document"
+                                      :items="signatureDocumentTemplateItems"
+                                      :showBlankItem="true"
+                                      :trailblazerField="true" />
+                    </div>
+                </div>
 
-                <DefinedValuePicker v-if="groupTypeOptions.isGroupSpecificRecordSourceVisible"
-                                    v-model="recordSourceValue"
-                                    label="Member Record Source"
-                                    help="The default record source assigned to new members of this group."
-                                    :definedTypeGuid="recordSourceDefinedTypeGuid"
-                                    :trailblazerField="true" />
+                <div v-if="groupTypeOptions.isGroupSpecificRecordSourceVisible" class="row">
+                    <div class="col-md-6">
+                        <DefinedValuePicker v-model="recordSourceValue"
+                                            label="Member Record Source"
+                                            help="The default record source assigned to new members of this group."
+                                            :definedTypeGuid="recordSourceDefinedTypeGuid"
+                                            :showBlankItem="true"
+                                            :trailblazerField="true" />
+                    </div>
+                </div>
 
-                <CheckBox v-if="isCurrentPersonGroupAdministrator"
-                          v-model="isSecurityRole"
-                          label="Enable as Security Role"
-                          :disabled="isLimitedToSecurityRoleGroups" />
+                <div v-if="isCurrentPersonGroupAdministrator" class="form-group">
+                    <InlineCheckBox v-model="isSecurityRole"
+                                    label="Enable as Security Role"
+                                    :disabled="isLimitedToSecurityRoleGroups" />
+                </div>
 
-                <ConditionalWell v-if="isSecurityRole">
-                    <RadioButtonList v-model="elevatedSecurityLevelValue"
-                                     label="Security Level"
-                                     :items="elevatedSecurityLevelItems"
-                                     horizontal />
-                </ConditionalWell>
+                <div v-if="isSecurityRole" class="row">
+                    <div class="col-md-6">
+                        <ConditionalWell>
+                            <RadioButtonList v-model="elevatedSecurityLevelValue"
+                                             label="Security Level"
+                                             :items="elevatedSecurityLevelItems" />
+                        </ConditionalWell>
+                    </div>
+                </div>
             </ContentStack>
 
             <!-- Stack 3 - Relationships -->
             <ContentStack v-if="groupTypeOptions.isPeerNetworkSectionVisible"
-                          title="Relationships"
-                          description="Override how this group contributes to the peer-network strength matrix.">
-                <CheckBox v-model="overrideRelationshipStrength"
-                          label="Override Relationship Strength" />
+                          title="Relationships" description="Relationship settings that define how connection strength is calculated for this group.">
+                <div class="form-group">
+                    <InlineCheckBox v-model="overrideRelationshipStrength"
+                                    label="Override Relationship Strength" />
+                </div>
 
-                <ConditionalWell v-if="overrideRelationshipStrength">
+                <template v-if="overrideRelationshipStrength">
                     <RadioButtonList v-model="relationshipStrengthOverrideValue"
                                      label="Relationship Strength"
-                                     :items="relationshipStrengthItems"
-                                     horizontal />
+                                     :items="relationshipStrengthItems" />
 
-                    <CheckBox v-if="(relationshipStrengthOverride ?? 0) !== 0"
-                              v-model="relationshipGrowthEnabledOverride"
-                              label="Enable Relationship Growth Over Time"
-                              help="Allow the strength of this group's relationships to increase over time." />
+                    <div class="form-group">
+                        <InlineSwitch v-if="hasRelationshipStrengthOverride"
+                                      v-model="showAdvancedRelationshipSettings"
+                                      label="Show Advanced Relationship Settings"
+                                      :trailblazerField="true" />
+                    </div>
 
-                    <InlineSwitch v-if="(relationshipStrengthOverride ?? 0) !== 0"
-                                  v-model="showAdvancedRelationshipSettings"
-                                  label="Show Advanced Relationship Settings"
-                                  :trailblazerField="true" />
-
-                    <ConditionalWell v-if="showAdvancedRelationshipSettings && (relationshipStrengthOverride ?? 0) !== RelationshipStrength.None">
-                        <div class="row">
-                            <div class="col-sm-6">
-                                <NumberBox v-model="leaderToLeaderRelationshipMultiplierOverrideValue"
-                                           label="Leader to Leader"
-                                           :placeholder="formatPercent(groupTypeOptions.leaderToLeaderMultiplierDefault)"
-                                           :minimumValue="0"
-                                           :maximumValue="100"
-                                           :decimalCount="2"
-                                           :trailblazerField="true">
-                                    <template #append>
-                                        <span class="input-group-addon">%</span>
-                                    </template>
-                                </NumberBox>
-                            </div>
-                            <div class="col-sm-6">
-                                <NumberBox v-model="leaderToNonLeaderRelationshipMultiplierOverrideValue"
-                                           label="Leader to Non-Leader"
-                                           :placeholder="formatPercent(groupTypeOptions.leaderToNonLeaderMultiplierDefault)"
-                                           :minimumValue="0"
-                                           :maximumValue="100"
-                                           :decimalCount="2"
-                                           :trailblazerField="true">
-                                    <template #append>
-                                        <span class="input-group-addon">%</span>
-                                    </template>
-                                </NumberBox>
-                            </div>
+                    <ConditionalWell v-if="showAdvancedRelationshipSettings && hasRelationshipStrengthOverride">
+                        <div class="form-group">
+                            <InlineCheckBox v-model="relationshipGrowthEnabledOverride"
+                                            label="Enable Relationship Growth Over Time"
+                                            help="Allow the strength of this group's relationships to increase over time." />
                         </div>
-                        <div class="row">
-                            <div class="col-sm-6">
-                                <NumberBox v-model="nonLeaderToLeaderRelationshipMultiplierOverrideValue"
-                                           label="Non-Leader to Leader"
-                                           :placeholder="formatPercent(groupTypeOptions.nonLeaderToLeaderMultiplierDefault)"
+
+                        <NotificationBox alertType="info">
+                            Use the matrix to adjust relationship scores based on group member relationships. For example, if members have strong connections with group leaders but little interaction with other non-leaders, you can reduce or remove the score percentage between non-leaders.
+                        </NotificationBox>
+
+                        <div class="d-grid gap-3 relationship-matrix" style="width: max-content; grid-template-columns: auto auto auto; row-gap: 0.25rem;">
+                            <!-- Header Row -->
+                            <div></div>
+                            <div class="d-flex align-items-center">
+                                <RockLabel>Leader</RockLabel>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <RockLabel>Non-Leader</RockLabel>
+                            </div>
+                            <!-- Leader Row -->
+                            <div class="d-flex align-items-center">
+                                <RockLabel>Leader</RockLabel>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <NumberBox v-model="leaderToLeaderRelationshipMultiplierOverrideValue"
+                                           :placeholder="formatPercent(groupTypeOptions.leaderToLeaderMultiplierDefault)"
+                                           :decimalCount="0"
                                            :minimumValue="0"
                                            :maximumValue="100"
-                                           :decimalCount="2"
+                                           :maxLength="3"
+                                           style="width: 150px;"
+                                           validationTitle="Leader to Leader Relationship Multiplier"
                                            :trailblazerField="true">
-                                    <template #append>
+                                    <template #inputGroupAppend>
                                         <span class="input-group-addon">%</span>
                                     </template>
                                 </NumberBox>
                             </div>
-                            <div class="col-sm-6">
-                                <NumberBox v-model="nonLeaderToNonLeaderRelationshipMultiplierOverrideValue"
-                                           label="Non-Leader to Non-Leader"
-                                           :placeholder="formatPercent(groupTypeOptions.nonLeaderToNonLeaderMultiplierDefault)"
+                            <div class="d-flex align-items-center">
+                                <NumberBox v-model="leaderToNonLeaderRelationshipMultiplierOverrideValue"
+                                           :placeholder="formatPercent(groupTypeOptions.leaderToNonLeaderMultiplierDefault)"
+                                           :decimalCount="0"
                                            :minimumValue="0"
                                            :maximumValue="100"
-                                           :decimalCount="2"
+                                           :maxLength="3"
+                                           style="width: 150px;"
+                                           validationTitle="Leader to Non-Leader Relationship Multiplier"
                                            :trailblazerField="true">
-                                    <template #append>
+                                    <template #inputGroupAppend>
+                                        <span class="input-group-addon">%</span>
+                                    </template>
+                                </NumberBox>
+                            </div>
+                            <!-- Non-Leader Row -->
+                            <div class="d-flex align-items-center">
+                                <RockLabel>Non-Leader</RockLabel>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <NumberBox v-model="nonLeaderToLeaderRelationshipMultiplierOverrideValue"
+                                           :placeholder="formatPercent(groupTypeOptions.nonLeaderToLeaderMultiplierDefault)"
+                                           :decimalCount="0"
+                                           :minimumValue="0"
+                                           :maximumValue="100"
+                                           :maxLength="3"
+                                           style="width: 150px;"
+                                           validationTitle="Non-Leader to Leader Relationship Multiplier"
+                                           :trailblazerField="true">
+                                    <template #inputGroupAppend>
+                                        <span class="input-group-addon">%</span>
+                                    </template>
+                                </NumberBox>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <NumberBox v-model="nonLeaderToNonLeaderRelationshipMultiplierOverrideValue"
+                                           :placeholder="formatPercent(groupTypeOptions.nonLeaderToNonLeaderMultiplierDefault)"
+                                           :decimalCount="0"
+                                           :minimumValue="0"
+                                           :maximumValue="100"
+                                           :maxLength="3"
+                                           style="width: 150px;"
+                                           validationTitle="Non-Leader to Non-Leader Relationship Multiplier"
+                                           :trailblazerField="true">
+                                    <template #inputGroupAppend>
                                         <span class="input-group-addon">%</span>
                                     </template>
                                 </NumberBox>
                             </div>
                         </div>
                     </ConditionalWell>
-                </ConditionalWell>
+                </template>
             </ContentStack>
         </ContentSection>
 
@@ -217,24 +284,35 @@
         <!-- ========================== -->
         <ContentSection v-if="groupTypeOptions.isRsvpSectionVisible"
                         title="RSVP"
-                        description="Reminder communication and lead time for group RSVPs.">
-            <ContentStack>
-                <NumberBox v-model="rsvpReminderOffsetDays"
-                           label="RSVP Reminder Lead Time"
-                           help="How many days before an event to send the reminder."
-                           :disabled="groupTypeOptions.rsvpReminderOffsetDays != null"
-                           :minimumValue="0"
-                           :decimalCount="0">
-                    <template #append>
-                        <span class="input-group-addon">Days</span>
-                    </template>
-                </NumberBox>
-                <NotificationBox v-if="groupTypeOptions.rsvpReminderOffsetDays != null" alertType="info">
-                    The Group Type pins this value; the override is locked.
-                </NotificationBox>
-                <NotificationBox v-if="groupTypeOptions.rsvpReminderSystemCommunicationGuid != null" alertType="info">
-                    The Group Type pins the RSVP Reminder Communication; the override is locked.
-                </NotificationBox>
+                        icon="ti ti-ticket">
+            <ContentStack title="Reminder Settings" description="Settings that control RSVP reminders for this group.">
+                <div class="row">
+                    <div class="col-md-6">
+                        <StaticFormControl v-if="groupTypeOptions.rsvpReminderSystemCommunication"
+                                           label="RSVP Reminder Communication"
+                                           help="The System Communication that should be sent to remind group members to RSVP for group events."
+                                           :modelValue="groupTypeOptions.rsvpReminderSystemCommunication.text ?? ''" />
+                        <DropDownList v-else
+                                      v-model="rsvpReminderSystemCommunicationGuid"
+                                      label="RSVP Reminder Communication"
+                                      help="The System Communication that should be sent to remind group members to RSVP for group events."
+                                      :items="groupTypeOptions.rsvpSystemCommunicationOptions ?? []"
+                                      showBlankItem
+                                      enhanceForLongLists />
+                    </div>
+                    <div class="col-md-6">
+                        <NumberBox v-model="rsvpReminderOffsetDays"
+                                   label="RSVP Reminder Lead Time"
+                                   help="How many days before an event to send the reminder."
+                                   :disabled="groupTypeOptions.rsvpReminderOffsetDays != null"
+                                   :minimumValue="0"
+                                   :decimalCount="0">
+                            <template #inputGroupAppend>
+                                <span class="input-group-addon">Days</span>
+                            </template>
+                        </NumberBox>
+                    </div>
+                </div>
             </ContentStack>
         </ContentSection>
 
@@ -394,14 +472,20 @@
         <!-- Section 10 - Group Member Workflows -->
         <!-- ========================== -->
         <GroupMemberWorkflows v-model:groupMemberWorkflowTriggers="groupMemberWorkflowTriggers"
-                                     :groupRoleOptions="groupTypeOptions.groupRoleOptions ?? []"
-                                     :allowSpecificGroupMemberWorkflows="groupTypeOptions.allowSpecificGroupMemberWorkflows" />
-    </fieldset>
+                              :groupRoleOptions="groupTypeOptions.groupRoleOptions ?? []"
+                              :allowSpecificGroupMemberWorkflows="groupTypeOptions.allowSpecificGroupMemberWorkflows" />
+    </ContentSectionContainer>
 </template>
 
 <style scoped>
-/* Phase 3 has no per-block style overrides; ContentSection / ContentStack /
-   ConditionalWell handle layout entirely. */
+.static-compact :deep(.form-group.static-control .form-control-static) {
+    padding: 0;
+    min-height: 0;
+}
+
+.relationship-matrix > :nth-child(n+7) {
+    margin-top: 0.75rem;
+}
 </style>
 
 <script setup lang="ts">
@@ -430,6 +514,7 @@
     import { propertyRef, updateRefValue } from "@Obsidian/Utility/component";
 
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import ContentSectionContainer from "@Obsidian/Controls/contentSectionContainer.obs";
     import ContentSection from "@Obsidian/Controls/contentSection.obs";
     import ContentStack from "@Obsidian/Controls/contentStack.obs";
     import ConditionalWell from "@Obsidian/Controls/conditionalWell.obs";
@@ -441,10 +526,12 @@
     import LocationsPanel from "./locationsPanel.partial.obs";
     import TextBox from "@Obsidian/Controls/textBox.obs";
     import CheckBox from "@Obsidian/Controls/checkBox.obs";
+    import InlineCheckBox from "@Obsidian/Controls/inlineCheckBox.obs";
     import CheckBoxList from "@Obsidian/Controls/checkBoxList.obs";
     import InlineSwitch from "@Obsidian/Controls/inlineSwitch.obs";
     import DropDownList from "@Obsidian/Controls/dropDownList.obs";
     import RadioButtonList from "@Obsidian/Controls/radioButtonList.obs";
+    import RockLabel from "@Obsidian/Controls/rockLabel.obs";
     import StaticFormControl from "@Obsidian/Controls/staticFormControl.obs";
     import GroupPicker from "@Obsidian/Controls/groupPicker.obs";
     import CampusPicker from "@Obsidian/Controls/campusPicker.obs";
@@ -539,13 +626,14 @@
     const isSecurityRole = propertyRef(props.modelValue.bag?.isSecurityRole ?? false, "IsSecurityRole");
     const elevatedSecurityLevel = propertyRef<ElevatedSecurityLevel>(props.modelValue.bag?.elevatedSecurityLevel ?? ElevatedSecurityLevel.None, "ElevatedSecurityLevel");
     const overrideRelationshipStrength = propertyRef(props.modelValue.bag?.overrideRelationshipStrength ?? false, "OverrideRelationshipStrength");
-    const relationshipStrengthOverride = propertyRef<RelationshipStrength | null>(props.modelValue.bag?.relationshipStrengthOverride ?? null, "RelationshipStrengthOverride");
+    const relationshipStrengthOverride = propertyRef<RelationshipStrength>(props.modelValue.bag?.relationshipStrengthOverride ?? RelationshipStrength.None, "RelationshipStrengthOverride");
     const relationshipGrowthEnabledOverride = propertyRef<boolean>(props.modelValue.bag?.relationshipGrowthEnabledOverride ?? false, "RelationshipGrowthEnabledOverride");
     const leaderToLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.leaderToLeaderRelationshipMultiplierOverride ?? null, "LeaderToLeaderRelationshipMultiplierOverride");
     const leaderToNonLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.leaderToNonLeaderRelationshipMultiplierOverride ?? null, "LeaderToNonLeaderRelationshipMultiplierOverride");
     const nonLeaderToLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.nonLeaderToLeaderRelationshipMultiplierOverride ?? null, "NonLeaderToLeaderRelationshipMultiplierOverride");
     const nonLeaderToNonLeaderRelationshipMultiplierOverride = propertyRef<number | null>(props.modelValue.bag?.nonLeaderToNonLeaderRelationshipMultiplierOverride ?? null, "NonLeaderToNonLeaderRelationshipMultiplierOverride");
     const rsvpReminderOffsetDays = propertyRef<number | null>(props.modelValue.bag?.rsvpReminderOffsetDays ?? null, "RsvpReminderOffsetDays");
+    const rsvpReminderSystemCommunication = propertyRef<ListItemBag | null>(props.modelValue.bag?.rsvpReminderSystemCommunication ?? null, "RsvpReminderSystemCommunication");
     const scheduleType = propertyRef<ScheduleType>(props.modelValue.bag?.scheduleType ?? ScheduleType.None, "ScheduleType");
     const weeklyDayOfWeek = propertyRef<number | null>(props.modelValue.bag?.weeklyDayOfWeek ?? null, "WeeklyDayOfWeek");
     const weeklyTimeOfDay = propertyRef<string | null>(props.modelValue.bag?.weeklyTimeOfDay ?? null, "WeeklyTimeOfDay");
@@ -579,7 +667,7 @@
         overrideRelationshipStrength, relationshipStrengthOverride, relationshipGrowthEnabledOverride,
         leaderToLeaderRelationshipMultiplierOverride, leaderToNonLeaderRelationshipMultiplierOverride,
         nonLeaderToLeaderRelationshipMultiplierOverride, nonLeaderToNonLeaderRelationshipMultiplierOverride,
-        rsvpReminderOffsetDays, scheduleType, weeklyDayOfWeek, weeklyTimeOfDay, iCalendarContent, namedSchedule,
+        rsvpReminderOffsetDays, rsvpReminderSystemCommunication, scheduleType, weeklyDayOfWeek, weeklyTimeOfDay, iCalendarContent, namedSchedule,
         schedulingMustMeetRequirements, disableScheduling, disableScheduleToolboxAccess,
         scheduleConfirmationLogic, scheduleCoordinatorPerson, scheduleCoordinatorNotificationTypes, attendanceRecordRequiredForCheckIn,
         isChatEnabledOverride, isLeavingChatChannelAllowedOverride, isChatChannelPublicOverride,
@@ -637,10 +725,30 @@
 
     const relationshipStrengthOverrideValue = computed<string>({
         get(): string {
-            return relationshipStrengthOverride.value?.toString() ?? "";
+            return relationshipStrengthOverride.value.toString();
         },
         set(newValue: string) {
-            relationshipStrengthOverride.value = nullableInt(newValue) as RelationshipStrength | null;
+            relationshipStrengthOverride.value = (nullableInt(newValue) ?? RelationshipStrength.None) as RelationshipStrength;
+        }
+    });
+
+    const hasRelationshipStrengthOverride = computed((): boolean => {
+        return relationshipStrengthOverride.value !== RelationshipStrength.None;
+    });
+
+    const rsvpReminderSystemCommunicationGuid = computed<string>({
+        get(): string {
+            return rsvpReminderSystemCommunication.value?.value ?? "";
+        },
+        set(newValue: string) {
+            if (!newValue) {
+                rsvpReminderSystemCommunication.value = null;
+                return;
+            }
+            const item = (props.groupTypeOptions.rsvpSystemCommunicationOptions ?? []).find(i => (i.value ?? "") === newValue);
+            rsvpReminderSystemCommunication.value = item
+                ? { value: item.value ?? "", text: item.text ?? "" }
+                : null;
         }
     });
 
@@ -885,7 +993,7 @@
 
         // Section 2 Stack 3
         updateRefValue(overrideRelationshipStrength, props.modelValue.bag?.overrideRelationshipStrength ?? false);
-        updateRefValue(relationshipStrengthOverride, props.modelValue.bag?.relationshipStrengthOverride ?? null);
+        updateRefValue(relationshipStrengthOverride, props.modelValue.bag?.relationshipStrengthOverride ?? RelationshipStrength.None);
         updateRefValue(relationshipGrowthEnabledOverride, props.modelValue.bag?.relationshipGrowthEnabledOverride ?? false);
         updateRefValue(leaderToLeaderRelationshipMultiplierOverride, props.modelValue.bag?.leaderToLeaderRelationshipMultiplierOverride ?? null);
         updateRefValue(leaderToNonLeaderRelationshipMultiplierOverride, props.modelValue.bag?.leaderToNonLeaderRelationshipMultiplierOverride ?? null);
@@ -894,6 +1002,7 @@
 
         // Section 3
         updateRefValue(rsvpReminderOffsetDays, props.modelValue.bag?.rsvpReminderOffsetDays ?? null);
+        updateRefValue(rsvpReminderSystemCommunication, props.modelValue.bag?.rsvpReminderSystemCommunication ?? null);
 
         // Section 4 Stack 1
         updateRefValue(scheduleType, props.modelValue.bag?.scheduleType ?? ScheduleType.None);
@@ -926,6 +1035,9 @@
         updateRefValue(groupRequirements, props.modelValue.bag?.groupRequirements ?? []);
         updateRefValue(groupSyncs, props.modelValue.bag?.groupSyncs ?? []);
         updateRefValue(groupMemberWorkflowTriggers, props.modelValue.bag?.groupMemberWorkflowTriggers ?? []);
+
+        // Section 4 Stack 2 — Phase 6 locations payload.
+        updateRefValue(groupLocations, props.modelValue.bag?.groupLocations ?? []);
     });
 
     // Outbound: emit a fresh ValidPropertiesBox when any tracked
@@ -970,6 +1082,7 @@
 
         // Section 3
         setPropertiesBoxValue(newValue, "rsvpReminderOffsetDays", rsvpReminderOffsetDays.value);
+        setPropertiesBoxValue(newValue, "rsvpReminderSystemCommunication", rsvpReminderSystemCommunication.value);
 
         // Section 4 Stack 1
         setPropertiesBoxValue(newValue, "scheduleType", scheduleType.value);
@@ -1003,6 +1116,9 @@
         setPropertiesBoxValue(newValue, "groupRequirements", groupRequirements.value);
         setPropertiesBoxValue(newValue, "groupSyncs", groupSyncs.value);
         setPropertiesBoxValue(newValue, "groupMemberWorkflowTriggers", groupMemberWorkflowTriggers.value);
+
+        // Section 4 Stack 2 — Phase 6 locations payload.
+        setPropertiesBoxValue(newValue, "groupLocations", groupLocations.value);
 
         emit("update:modelValue", newValue);
     });

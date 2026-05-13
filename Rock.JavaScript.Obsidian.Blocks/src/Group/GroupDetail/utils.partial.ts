@@ -46,14 +46,16 @@ export function intToPercent(value: number | null | undefined): number | null {
 }
 
 /**
- * Formats a 0-1 decimal multiplier as a "NN%" placeholder string used on
- * the override inputs to show the inherited group-type value.
+ * Formats a 0-1 decimal multiplier as an integer placeholder string used on
+ * the override inputs to show the inherited group-type value. The "%" sign
+ * is intentionally omitted because the input renders a "%" addon next to
+ * the value, so including it here would double the symbol.
  */
 export function formatPercent(value: number | undefined | null): string {
     if (value == null) {
         return "";
     }
-    return `${Math.round(value * 100)}%`;
+    return Math.round(value * 100).toString();
 }
 
 /**

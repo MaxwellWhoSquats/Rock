@@ -540,12 +540,14 @@ export type GroupBag = {
     rsvpReminderOffsetDays?: number | null;
 
     /**
-     * Gets or sets the RSVP reminder system communication Guid
-     * override. Null = inherit from group type's pinned value
-     * (read-only when the group type pins it). Resolved server-side
-     * to Group.RSVPReminderSystemCommunicationId.
+     * Gets or sets the RSVP reminder system communication override.
+     * ListItemBag.value is the SystemCommunication Guid;
+     * ListItemBag.text is the communication title. Null = inherit
+     * from group type's pinned value (read-only when the group type
+     * pins it). Resolved server-side to
+     * Group.RSVPReminderSystemCommunicationId.
      */
-    rsvpReminderSystemCommunicationGuid?: Guid | null;
+    rsvpReminderSystemCommunication?: ListItemBag | null;
 
     /**
      * Gets or sets the schedule confirmation logic (Ask /
