@@ -460,7 +460,7 @@
         <!-- ========================== -->
         <ContentSection v-if="groupTypeOptions.isChatSectionVisible"
                         title="Chat"
-                        description="Chat channel settings for this group.">
+                        icon="ti ti-message-dots">
             <ContentStack>
                 <RadioButtonList v-model="isChatEnabledOverrideValue"
                                  label="Enable Chat"

@@ -67,7 +67,7 @@
     import { PanelAction } from "@Obsidian/Types/Controls/panelAction";
     import { onConfigurationValuesChanged, useConfigurationValues, useEntityDetailBlock, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
     import { DetailBlockBox } from "@Obsidian/ViewModels/Blocks/detailBlockBox";
-    import { RelationshipStrengthDescription } from "@Obsidian/Enums/Group/relationshipStrength";
+    import { RelationshipStrength, RelationshipStrengthDescription } from "@Obsidian/Enums/Group/relationshipStrength";
     import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
     import { GroupDetailOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailOptionsBag";
     import { GroupTypeOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag";
@@ -147,7 +147,7 @@
      */
     const blockLabels = computed((): PanelAction[] => {
         const bag = groupViewBag.value;
-        if (!bag || panelMode.value !== DetailPanelMode.View) {
+        if (!bag || panelMode.value === DetailPanelMode.Add) {
             return [];
         }
 
@@ -161,15 +161,15 @@
             labels.push({ title: "Inactive", type: "warning" });
         }
 
-        if (bag.relationshipStrength != null) {
+        if (bag.relationshipStrength != null && bag.relationshipStrength !== RelationshipStrength.None) {
             const strengthLabel = RelationshipStrengthDescription[bag.relationshipStrength];
             if (strengthLabel) {
-                labels.push({ title: strengthLabel, type: "default" });
+                labels.push({
+                    title: `${strengthLabel} Relationships`,
+                    type: "info",
+                    iconCssClass: "ti ti-affiliate"
+                });
             }
-        }
-
-        if (bag.isPublic) {
-            labels.push({ title: "Public", type: "info" });
         }
 
         if (bag.isChatEnabled) {
@@ -178,6 +178,10 @@
                 type: "info",
                 iconCssClass: "ti ti-messages"
             });
+        }
+
+        if (bag.isPublic) {
+            labels.push({ title: "Public", type: "default" });
         }
 
         return labels;
@@ -190,7 +194,7 @@
      */
     const headerLabels = computed((): PanelAction[] => {
         const bag = groupViewBag.value;
-        if (!bag || panelMode.value !== DetailPanelMode.View) {
+        if (!bag || panelMode.value === DetailPanelMode.Add) {
             return [];
         }
 

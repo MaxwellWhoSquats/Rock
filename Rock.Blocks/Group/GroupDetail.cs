@@ -2009,15 +2009,38 @@ namespace Rock.Blocks.Group
 
             var canAdministrate = groupType.IsAuthorized( Authorization.ADMINISTRATE, RequestContext.CurrentPerson );
 
+            string url = null;
+            if ( canAdministrate )
+            {
+                var idKey = Rock.Utility.IdHasher.Instance.GetHash( groupType.Id );
+                var resolved = ResolveEntityUrl(
+                    typeof( Model.GroupType ),
+                    groupType,
+                    fallbackUrl: $"/admin/general/group-types/{idKey}" );
+
+                if ( resolved.IsNotNullOrWhiteSpace() )
+                {
+                    /*
+                        2026-05-14 - MSE
+
+                        autoEdit + returnUrl must be sent as a pair: the
+                        DetailBlock framework only honors returnUrl when
+                        autoEdit is also set (detailBlock.ts:736-744).
+
+                        Reason: One-click GroupType edit with round-trip back.
+                    */
+                    var separator = resolved.Contains( "?" ) ? "&" : "?";
+                    var returnUrl = RequestContext?.RequestUri?.PathAndQuery;
+                    url = returnUrl.IsNotNullOrWhiteSpace()
+                        ? $"{resolved}{separator}autoEdit=true&returnUrl={Uri.EscapeDataString( returnUrl )}"
+                        : $"{resolved}{separator}autoEdit=true";
+                }
+            }
+
             return new GroupDetailGroupTypeBag
             {
                 Name = groupType.Name,
-                Url = canAdministrate
-                    ? ResolveEntityUrl(
-                        typeof( Model.GroupType ),
-                        groupType,
-                        fallbackUrl: $"/page/GroupTypeDetail?GroupTypeId={Rock.Utility.IdHasher.Instance.GetHash( groupType.Id )}" )
-                    : null,
+                Url = url,
                 Color = groupType.GroupTypeColor
             };
         }
