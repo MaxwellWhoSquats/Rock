@@ -154,11 +154,19 @@
         const labels: PanelAction[] = [];
 
         if (bag.isArchived) {
-            labels.push({ title: "Archived", type: "warning" });
+            labels.push({
+                title: "Archived",
+                type: "warning",
+                iconCssClass: "ti ti-archive"
+            });
         }
 
         if (!bag.isActive) {
-            labels.push({ title: "Inactive", type: "warning" });
+            labels.push({
+                title: "Inactive",
+                type: "warning",
+                iconCssClass: "ti ti-bulb"
+            });
         }
 
         if (bag.relationshipStrength != null && bag.relationshipStrength !== RelationshipStrength.None) {
