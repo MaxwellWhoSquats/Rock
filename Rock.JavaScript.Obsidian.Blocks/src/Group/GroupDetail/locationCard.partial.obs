@@ -82,7 +82,7 @@
 <script setup lang="ts">
     /// <reference types="google.maps" />
     /* global google */
-    import { computed, onBeforeMount, onMounted, PropType, ref, watch } from "vue";
+    import { computed, onBeforeMount, onMounted, onUnmounted, PropType, ref, watch } from "vue";
     import { Guid } from "@Obsidian/Types";
     import { Coordinate, DrawingMode } from "@Obsidian/Types/Controls/geo";
     import { GroupLocationPickerMode } from "@Obsidian/Enums/Group/groupLocationPickerMode";
@@ -173,6 +173,7 @@
     let mapId: string | null = null;
     let centerLatitude = fallbackCenterLatitude;
     let centerLongitude = fallbackCenterLongitude;
+    let resizeObserver: ResizeObserver | null = null;
 
     onBeforeMount(async (): Promise<void> => {
         const settings = await loadMapResources({ mapStyleValueGuid: props.mapStyleValueGuid ?? "" });
@@ -291,7 +292,11 @@
             event whenever the container's box changes keeps the map
             painted on initial load.
         */
-        const observer = new ResizeObserver(() => {
+        // Disconnect any prior observer in case renderMap re-runs (e.g.,
+        // the watcher fires after both isGoogleLoaded and isMounted have
+        // settled) so we don't stack observers on the same container.
+        resizeObserver?.disconnect();
+        resizeObserver = new ResizeObserver(() => {
             google.maps.event.trigger(map, "resize");
 
             // Re-frame the geometry so the polygon/marker stays
@@ -303,8 +308,13 @@
                 map.setCenter(center);
             }
         });
-        observer.observe(mapContainer.value);
+        resizeObserver.observe(mapContainer.value);
     }
+
+    onUnmounted((): void => {
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+    });
 
     /**
      * Returns a sensible center LatLng for the static map: the single

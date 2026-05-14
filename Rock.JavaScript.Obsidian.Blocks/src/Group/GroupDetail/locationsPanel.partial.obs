@@ -4,6 +4,9 @@
                   title="Group Location Schedules"
                   description="Provide the location-specific schedules used for this group."
                   headerLocation="top">
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Danger">
+            {{ errorMessage }}
+        </NotificationBox>
         <Grid :data="gridData"
               keyField="guid"
               itemTerm="Group Location"
@@ -35,13 +38,19 @@
     import { computed, PropType, ref } from "vue";
     import Grid, { TextColumn, EditColumn, DeleteColumn } from "@Obsidian/Controls/grid";
     import ContentStack from "@Obsidian/Controls/contentStack.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
     import LocationModal from "./locationModal.partial.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { GroupLocationPickerMode } from "@Obsidian/Enums/Group/groupLocationPickerMode";
     import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { CanDeleteRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteRequestBag";
+    import { CanDeleteResponseBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteResponseBag";
     import { GroupLocationStateBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLocationStateBag";
     import { FamilyMemberLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/familyMemberLocationBag";
     import { Guid } from "@Obsidian/Types";
     import { newGuid } from "@Obsidian/Utility/guid";
+    import { useInvokeBlockAction } from "@Obsidian/Utility/block";
+    import { EntityKey } from "./types.partial";
 
     const props = defineProps({
         groupLocations: {
@@ -84,9 +93,12 @@
 
     // #region Values
 
+    const invokeBlockAction = useInvokeBlockAction();
+
     const theGroupLocation = ref<GroupLocationStateBag>(createNewGroupLocation());
     const isModalVisible = ref(false);
     const isEditing = ref(false);
+    const errorMessage = ref<string | null>(null);
 
     // #endregion
 
@@ -172,8 +184,26 @@
         isModalVisible.value = true;
     }
 
-    function onDelete(guid: string): void {
+    async function onDelete(guid: string): Promise<void> {
+        const result = await invokeBlockAction<CanDeleteResponseBag>("CanDeleteEntity", {
+            request: {
+                entityKey: EntityKey.GroupLocation,
+                entityGuid: guid
+            } as CanDeleteRequestBag
+        });
+
+        if (!result.isSuccess || !result.data) {
+            errorMessage.value = result.errorMessage || "Unable to delete this group location.";
+            return;
+        }
+
+        if (!result.data.canDelete) {
+            errorMessage.value = result.data.errorMessage || "This group location cannot be deleted.";
+            return;
+        }
+
         groupLocations.value = groupLocations.value.filter(l => l.guid !== guid);
+        errorMessage.value = null;
     }
 
     function onSave(value: GroupLocationStateBag): void {

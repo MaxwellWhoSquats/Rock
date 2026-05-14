@@ -31,7 +31,7 @@ import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
  * Stack 2 grid. Mirrors WebForms GroupLocationsState at
  * GroupDetail.ascx.cs:3525-3848 in bag form, with the
  * LocationPicker emit shape locked per Q6.9
- * (selectedLocation + selectedLocationMode
+ * (Rock.ViewModels.Blocks.Group.GroupDetail.GroupLocationStateBag.SelectedLocation + Rock.ViewModels.Blocks.Group.GroupDetail.GroupLocationStateBag.SelectedLocationMode
  * discriminator) so server-side
  * LocationService resolution happens once at save time.
  * Active schedules only per Q6.3; inactive schedules are reconciled
@@ -62,7 +62,7 @@ export type GroupLocationStateBag = {
 
     /**
      * Gets or sets the unique identifier of the group location.
-     * New rows arrive with Guid.Empty; the save flow
+     * New rows arrive with System.Guid.Empty; the save flow
      * assigns a fresh Guid before persisting.
      */
     guid: Guid;
@@ -100,17 +100,20 @@ export type GroupLocationStateBag = {
 
     /**
      * Gets or sets the raw picker emit. The runtime shape is
-     * determined by selectedLocationMode per Q6.9:
-     * ListItemBag when Named or GroupMember (a
-     * FamilyMemberLocationBag.LocationGuid wrapper);
+     * determined by Rock.ViewModels.Blocks.Group.GroupDetail.GroupLocationStateBag.SelectedLocationMode per Q6.9:
+     * Rock.ViewModels.Utility.ListItemBag when Named or GroupMember (a
+     * Rock.ViewModels.Blocks.Group.GroupDetail.FamilyMemberLocationBag.LocationGuid wrapper);
      * Rock.ViewModels.Controls.AddressControlBag when
      * Address; a Well-Known Text string when Point or Polygon.
+     * Typed as System.Object so System.Text.Json can
+     * round-trip the heterogeneous shape; the server-side resolver
+     * branches on the discriminator and casts.
      */
-    selectedLocation?: unknown | null;
+    selectedLocation?: unknown;
 
     /**
      * Gets or sets the discriminator describing how
-     * selectedLocation was emitted by the
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupLocationStateBag.SelectedLocation was emitted by the
      * &lt;LocationPicker&gt; or the Member-tab dropdown.
      * Drives the server-side ResolveLocationFromBag branch.
      */

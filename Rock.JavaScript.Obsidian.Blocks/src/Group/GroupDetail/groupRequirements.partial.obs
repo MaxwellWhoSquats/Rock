@@ -70,7 +70,7 @@
 
         <div class="row">
             <div class="col-md-6">
-                <DropDownList label="Applies to Group Role"
+                <DropDownList label="Applies to Role"
                               v-model="groupRoleValue"
                               :items="groupRoleItems"
                               showBlankItem
@@ -80,7 +80,7 @@
 
         <div class="row">
             <div class="col-md-6">
-                <RadioButtonList label="Applies to Age Classification"
+                <RadioButtonList label="Applies to Age Group"
                                  v-model="appliesToAgeClassificationValue"
                                  :items="enumToListItemBag(AppliesToAgeClassificationDescription)"
                                  help="Determines which age classifications this requirement applies to." />
@@ -113,7 +113,7 @@
 
         <div class="row">
             <div class="col-md-12">
-                <InlineCheckBox label="Allow Leaders to Override"
+                <InlineCheckBox label="Allow Leader Override"
                                 v-model="theGroupRequirement.allowLeadersToOverride"
                                 help="When enabled, group leaders can override this requirement for their members." />
             </div>
@@ -121,7 +121,7 @@
 
         <div class="row">
             <div class="col-md-12">
-                <InlineCheckBox label="Members Must Meet This Requirement Before Adding"
+                <InlineCheckBox label="Require Before Adding Member"
                                 v-model="theGroupRequirement.mustMeetRequirementToAddMember"
                                 help="If enabled, a person can only become a group member if this requirement is met. Note: only applies to Data View and SQL type requirements since manual ones can't be checked until after the person is added." />
             </div>
@@ -147,10 +147,14 @@
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { enumToListItemBag } from "@Obsidian/Utility/enumUtils";
     import { newGuid } from "@Obsidian/Utility/guid";
+    import { useInvokeBlockAction } from "@Obsidian/Utility/block";
     import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { CanDeleteRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteRequestBag";
+    import { CanDeleteResponseBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteResponseBag";
     import { GroupRequirementBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupRequirementBag";
     import { InheritedGroupRequirementBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/inheritedGroupRequirementBag";
     import { GroupRequirementTypeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupRequirementTypeBag";
+    import { EntityKey } from "./types.partial";
 
     const props = defineProps({
         groupRequirements: {
@@ -184,6 +188,8 @@
     }>();
 
     // #region Values
+
+    const invokeBlockAction = useInvokeBlockAction();
 
     const theGroupRequirement = ref<GroupRequirementBag>(createNewGroupRequirement());
     const isModalVisible = ref(false);
@@ -359,8 +365,26 @@
         isModalVisible.value = true;
     }
 
-    function onDelete(guid: string): void {
+    async function onDelete(guid: string): Promise<void> {
+        const result = await invokeBlockAction<CanDeleteResponseBag>("CanDeleteEntity", {
+            request: {
+                entityKey: EntityKey.GroupRequirement,
+                entityGuid: guid
+            } as CanDeleteRequestBag
+        });
+
+        if (!result.isSuccess || !result.data) {
+            errorMessage.value = result.errorMessage || "Unable to delete this group requirement.";
+            return;
+        }
+
+        if (!result.data.canDelete) {
+            errorMessage.value = result.data.errorMessage || "This group requirement cannot be deleted.";
+            return;
+        }
+
         groupRequirements.value = groupRequirements.value.filter(r => r.guid !== guid);
+        errorMessage.value = null;
     }
 
     function onSave(): void {

@@ -28,22 +28,35 @@ import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 
 /**
  * Represents a single Group Member Workflow Trigger row in the
- * Section 10 grid. The pipe-delimited 7-tuple TypeQualifier
- * persisted on the entity is decomposed into individual typed
- * fields here so the Vue layer never touches the raw qualifier
- * string.
+ * Section 10 grid. Mirrors the canonical
+ * GroupTypeGroupMemberWorkflowTriggerBag sibling shape but
+ * scoped to per-group triggers. The pipe-delimited 7-tuple
+ * TypeQualifier persisted on the entity is decomposed into
+ * individual typed fields here so the Vue layer never touches the
+ * raw qualifier string.
  */
 export type GroupMemberWorkflowTriggerBag = {
-    /** Gets or sets the "from" role qualifier Guid. */
+    /**
+     * Gets or sets the "from" role qualifier Guid. Used by
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberRoleChanged.
+     * Null = Any.
+     */
     fromRoleGuid?: Guid | null;
 
-    /** Gets or sets the "from" status qualifier. */
+    /**
+     * Gets or sets the "from" status qualifier. Used by
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberStatusChanged.
+     * Null = Any.
+     */
     fromStatus?: GroupMemberStatus | null;
 
     /** Gets or sets the unique identifier of the workflow trigger. */
     guid: Guid;
 
-    /** Gets or sets a value indicating whether the trigger is active. */
+    /**
+     * Gets or sets a value indicating whether the trigger is active.
+     * Default true on Add.
+     */
     isActive: boolean;
 
     /** Gets or sets the user-facing name of the workflow trigger. */
@@ -51,34 +64,54 @@ export type GroupMemberWorkflowTriggerBag = {
 
     /**
      * Gets or sets a value indicating whether the placement workflow
-     * requires a note.
+     * requires a note. Used by
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberPlacedElsewhere.
      */
     requireNoteOnPlacement: boolean;
 
     /**
      * Gets or sets a value indicating whether the placement workflow
-     * shows a note entry field.
+     * shows a note entry field. Used by
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberPlacedElsewhere.
      */
     showNoteOnPlacement: boolean;
 
-    /** Gets or sets the "to" role qualifier Guid. */
+    /**
+     * Gets or sets the "to" role qualifier Guid. Used by
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberAddedToGroup,
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberRemovedFromGroup
+     * (labelled "With Role of" in the modal), and
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberRoleChanged.
+     * Null = Any.
+     */
     toRoleGuid?: Guid | null;
 
-    /** Gets or sets the "to" status qualifier. */
+    /**
+     * Gets or sets the "to" status qualifier. Used by
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberAddedToGroup,
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberRemovedFromGroup
+     * (labelled "With Status of" in the modal), and
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberStatusChanged.
+     * Null = Any.
+     */
     toStatus?: GroupMemberStatus | null;
 
     /**
-     * Gets or sets a value indicating whether the workflow fires only
-     * on the member's first attendance.
+     * Gets or sets a value indicating whether the workflow fires
+     * only on the member's first attendance. Used by
+     * Rock.Model.GroupMemberWorkflowTriggerType.MemberAttendedGroup.
      */
     triggerOnFirstAttendance: boolean;
 
-    /** Gets or sets the trigger type. */
+    /**
+     * Gets or sets the trigger type (Member Added / Removed /
+     * Status Changed / Role Changed / Attended / Placed Elsewhere).
+     */
     triggerType: GroupMemberWorkflowTriggerType;
 
     /**
-     * Gets or sets the workflow type to start when the trigger fires.
-     * ListItemBag.value is the WorkflowType Guid.
+     * Gets or sets the workflow type to start when the trigger
+     * fires. ListItemBag.value is the WorkflowType Guid.
      */
     workflowType?: ListItemBag | null;
 };

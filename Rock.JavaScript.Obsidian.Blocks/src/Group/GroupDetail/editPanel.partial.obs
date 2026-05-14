@@ -5,8 +5,6 @@
             <strong>Note</strong> Because this group is used by Rock, editing is restricted.
         </NotificationBox>
 
-        <NotificationBox v-if="errorMessage" alertType="danger" v-html="errorMessage" />
-
         <!-- ========================== -->
         <!-- Section 1 - Top fields -->
         <!-- ========================== -->
@@ -67,12 +65,17 @@
             <ContentStack title="Overview" description="Basic information that identifies this group and places it within the organization.">
                 <div class="row">
                     <div class="col-md-6">
-                        <DropDownList v-if="isAddMode"
-                                      v-model="groupTypeIdValue"
-                                      label="Group Type"
-                                      :items="allowedGroupTypeItems"
-                                      rules="required"
-                                      :showBlankItem="true" />
+                        <template v-if="isAddMode">
+                            <DropDownList v-model="groupTypeIdValue"
+                                          label="Group Type"
+                                          :items="allowedGroupTypeItems"
+                                          rules="required"
+                                          :showBlankItem="true" />
+
+                            <NotificationBox v-if="!isCurrentGroupTypeAllowed" ref="groupTypeWarningElement" alertType="warning">
+                                The selected parent group does not allow this Group Type. Choose a different Group Type or parent group.
+                            </NotificationBox>
+                        </template>
 
                         <div v-else class="static-compact">
                             <StaticFormControl label="Group Type"
@@ -85,6 +88,10 @@
                     <div class="col-md-6">
                         <GroupPicker v-model="parentGroup"
                                      label="Parent Group" />
+
+                        <NotificationBox v-if="parentGroup && !parentGroupIsActive" alertType="warning">
+                            The selected parent group is inactive. Children of inactive groups may be hidden by default in some areas of Rock.
+                        </NotificationBox>
                     </div>
                 </div>
 
@@ -128,6 +135,10 @@
                                 <span class="input-group-addon">Members</span>
                             </template>
                         </NumberBox>
+
+                        <NotificationBox v-if="isCapacityBelowMemberCount" alertType="warning">
+                            This group has {{ bag.memberCount }} active member{{ bag.memberCount === 1 ? "" : "s" }}, which exceeds the capacity of {{ groupCapacity }}.
+                        </NotificationBox>
                     </div>
                 </div>
 
@@ -339,20 +350,30 @@
                 <ConditionalWell v-if="scheduleType !== scheduleTypeNone">
                     <div v-if="scheduleType === scheduleTypeWeekly" class="row">
                         <div class="col-md-6">
-                            <DayOfWeekPicker v-model="weeklyDayOfWeekValue" label="Day of Week" />
+                            <DayOfWeekPicker v-model="weeklyDayOfWeekValue" label="Day of Week" rules="required" />
                         </div>
                         <div class="col-md-6">
-                            <TimePicker v-model="weeklyTimeOfDayValue" label="Time of Day" />
+                            <TimePicker v-model="weeklyTimeOfDayValue" label="Time of Day" rules="required" />
                         </div>
                     </div>
 
-                    <ScheduleBuilder v-if="scheduleType === scheduleTypeCustom"
-                                     v-model="iCalendarContent"
-                                     label="Custom Schedule" />
+                    <div class="row">
+                        <div class="col-md-6">
+                            <ScheduleBuilder v-if="scheduleType === scheduleTypeCustom"
+                                             v-model="iCalendarContent"
+                                             label="Custom Schedule"
+                                             rules="required" />
+                        </div>
+                    </div>
 
-                    <SchedulePicker v-if="scheduleType === scheduleTypeNamed"
-                                    v-model="namedSchedule"
-                                    label="Named Schedule" />
+                    <div class="row">
+                        <div class="col-md-6">
+                            <SchedulePicker v-if="scheduleType === scheduleTypeNamed"
+                                            v-model="namedSchedule"
+                                            label="Named Schedule"
+                                            rules="required" />
+                        </div>
+                    </div>
                 </ConditionalWell>
             </ContentStack>
 
@@ -461,35 +482,36 @@
         <ContentSection v-if="groupTypeOptions.isChatSectionVisible"
                         title="Chat"
                         icon="ti ti-message-dots">
-            <ContentStack>
+            <ContentStack title="Group Chat" description="Enable groups of this type to participate in the chat system as chat channels.">
                 <RadioButtonList v-model="isChatEnabledOverrideValue"
-                                 label="Enable Chat"
+                                 label="Enable Group Chat"
                                  :items="triStateOverrideItems"
-                                 horizontal
                                  :disabled="isSystem" />
+            </ContentStack>
+
+            <ContentStack title="Group Chat Settings" description="Control how group chat works for this group type.">
                 <RadioButtonList v-model="isLeavingChatChannelAllowedOverrideValue"
                                  label="Allow Members to Leave Channel"
                                  :items="triStateOverrideItems"
-                                 horizontal
                                  :disabled="isSystem" />
+
                 <RadioButtonList v-model="isChatChannelPublicOverrideValue"
                                  label="Public Channel"
                                  :items="triStateOverrideItems"
-                                 horizontal
                                  :disabled="isSystem" />
+
                 <RadioButtonList v-model="isChatChannelAlwaysShownOverrideValue"
-                                 label="Always Show"
+                                 label="Always Show Channel"
                                  :items="triStateOverrideItems"
-                                 horizontal
                                  :disabled="isSystem" />
-                <DropDownList v-model="chatPushNotificationModeOverrideValue"
-                              label="Push Notification Mode"
-                              :items="chatPushNotificationModeItems"
-                              :showBlankItem="true"
-                              :disabled="isSystem" />
+
+                <RadioButtonList v-model="chatPushNotificationModeOverrideValue"
+                                 label="Push Notification Mode"
+                                 :items="chatPushNotificationModeItems"
+                                 :disabled="isSystem" />
 
                 <ImageUploader v-model="chatChannelAvatarBinaryFile"
-                               label="Chat Channel Avatar"
+                               label="Channel Avatar"
                                :binaryFileTypeGuid="binaryFileTypeDefault"
                                :disabled="isSystem" />
             </ContentStack>
@@ -538,6 +560,7 @@
     import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
     import { TimePickerValue } from "@Obsidian/ViewModels/Controls/timePickerValue";
     import { GroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupBag";
+    import { ParentGroupBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/parentGroupBag";
     import { GroupTypeOptionsBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupTypeOptionsBag";
     import { GroupMemberInheritedAttributeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberInheritedAttributeBag";
     import { GroupMemberWorkflowTriggerBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberWorkflowTriggerBag";
@@ -546,7 +569,7 @@
     import { GroupLocationStateBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupLocationStateBag";
     import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
     import { ValidPropertiesBox } from "@Obsidian/ViewModels/Utility/validPropertiesBox";
-    import { setPropertiesBoxValue, watchPropertyChanges } from "@Obsidian/Utility/block";
+    import { setPropertiesBoxValue, useInvokeBlockAction, watchPropertyChanges } from "@Obsidian/Utility/block";
     import { propertyRef, updateRefValue } from "@Obsidian/Utility/component";
 
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
@@ -579,7 +602,7 @@
     import TimePicker from "@Obsidian/Controls/timePicker.obs";
     import ScheduleBuilder from "@Obsidian/Controls/scheduleBuilder.obs";
     import SchedulePicker from "@Obsidian/Controls/schedulePicker.obs";
-    import { combineFlagValues, extractFlagValues, formatPercent, formatTimeValue, intToPercent, nullableInt, parseTimeString, percentToInt, stringToTriState, triStateToString } from "./utils.partial";
+    import { combineFlagValues, extractFlagValues, formatPercent, formatTimeValue, intToPercent, nullableInt, parseTimeString, percentToInt, scrollNotificationIntoView, stringToTriState, triStateToString } from "./utils.partial";
     import { enumToListItemBag } from "@Obsidian/Utility/enumUtils";
 
     const props = defineProps({
@@ -602,10 +625,6 @@
         preventSelectingInactiveCampus: {
             type: Boolean,
             default: false
-        },
-        errorMessage: {
-            type: String,
-            default: ""
         }
     });
 
@@ -627,6 +646,8 @@
 
     // #region Values
 
+    const invokeBlockAction = useInvokeBlockAction();
+
     const bag = computed((): GroupBag => props.modelValue?.bag ?? {} as GroupBag);
 
     const isAddMode = computed((): boolean => !bag.value.idKey);
@@ -642,6 +663,11 @@
         || (props.modelValue.bag?.nonLeaderToLeaderRelationshipMultiplierOverride ?? null) !== null
         || (props.modelValue.bag?.nonLeaderToNonLeaderRelationshipMultiplierOverride ?? null) !== null
     );
+
+    const parentGroupIsActive = ref<boolean>(props.modelValue.bag?.parentGroup?.isActive ?? true);
+
+    const allowedGroupTypeItems = ref<ListItemBag[]>(props.allowedGroupTypes ?? []);
+    const groupTypeWarningElement = ref<InstanceType<typeof NotificationBox> | null>(null);
 
     const attributes = ref(props.modelValue.bag?.attributes ?? {});
     const attributeValues = ref(props.modelValue.bag?.attributeValues ?? {});
@@ -716,6 +742,12 @@
     // #endregion
 
     // #region Computed Values
+
+    const isCapacityBelowMemberCount = computed((): boolean => {
+        const capacity = groupCapacity.value;
+        const memberCount = bag.value.memberCount ?? 0;
+        return capacity !== null && capacity !== undefined && memberCount > 0 && capacity < memberCount;
+    });
 
     const inactiveReasonValueIdValue = computed<string>({
         get(): string {
@@ -926,24 +958,20 @@
         }
     });
 
-    const allowedGroupTypeItems = computed((): ListItemBag[] => props.allowedGroupTypes ?? []);
+    const isCurrentGroupTypeAllowed = computed((): boolean => {
+        const currentId = groupTypeId.value;
+        if (currentId === null || currentId === undefined) {
+            return true;
+        }
+        return allowedGroupTypeItems.value.some(i => i.value === currentId.toString());
+    });
     const signatureDocumentTemplateItems = computed((): ListItemBag[] => props.signatureDocumentTemplates ?? []);
     const inactiveReasonItems = computed((): ListItemBag[] => props.groupTypeOptions.inactiveReasons ?? []);
     const statusItems = computed((): ListItemBag[] => props.groupTypeOptions.statusValues ?? []);
 
-    const elevatedSecurityLevelItems = computed((): ListItemBag[] => {
-        return Object.entries(ElevatedSecurityLevelDescription).map(([value, text]) => ({
-            value: value.toString(),
-            text: String(text)
-        }));
-    });
+    const elevatedSecurityLevelItems = computed((): ListItemBag[] => enumToListItemBag(ElevatedSecurityLevelDescription));
 
-    const relationshipStrengthItems = computed((): ListItemBag[] => {
-        return Object.entries(RelationshipStrengthDescription).map(([value, text]) => ({
-            value: value.toString(),
-            text: String(text)
-        }));
-    });
+    const relationshipStrengthItems = computed((): ListItemBag[] => enumToListItemBag(RelationshipStrengthDescription));
 
     const scheduleTypeItems = computed((): ListItemBag[] => {
         const allowed = props.groupTypeOptions.allowedScheduleTypes ?? 0;
@@ -960,24 +988,14 @@
         return items;
     });
 
-    const scheduleConfirmationLogicItems = computed((): ListItemBag[] => {
-        return Object.entries(ScheduleConfirmationLogicDescription).map(([value, text]) => ({
-            value: value.toString(),
-            text: String(text)
-        }));
-    });
+    const scheduleConfirmationLogicItems = computed((): ListItemBag[] => enumToListItemBag(ScheduleConfirmationLogicDescription));
 
     const coordinatorNotificationItems = computed((): ListItemBag[] =>
         enumToListItemBag(ScheduleCoordinatorNotificationTypeDescription)
             .filter(i => i.value !== ScheduleCoordinatorNotificationType.None.toString())
     );
 
-    const attendanceRecordRequiredForCheckInItems = computed((): ListItemBag[] => {
-        return Object.entries(AttendanceRecordRequiredForCheckInDescription).map(([value, text]) => ({
-            value: value.toString(),
-            text: String(text)
-        }));
-    });
+    const attendanceRecordRequiredForCheckInItems = computed((): ListItemBag[] => enumToListItemBag(AttendanceRecordRequiredForCheckInDescription));
 
     const triStateOverrideItems = computed((): ListItemBag[] => [
         { value: "", text: "Inherit from Group Type" },
@@ -985,12 +1003,10 @@
         { value: "false", text: "No" }
     ]);
 
-    const chatPushNotificationModeItems = computed((): ListItemBag[] => {
-        return Object.entries(ChatNotificationModeDescription).map(([value, text]) => ({
-            value: value.toString(),
-            text: String(text)
-        }));
-    });
+    const chatPushNotificationModeItems = computed((): ListItemBag[] => [
+        { value: "", text: "Inherit from Group Type" },
+        ...enumToListItemBag(ChatNotificationModeDescription)
+    ]);
 
     const inheritedMemberAttributes = computed((): GroupMemberInheritedAttributeBag[] => {
         return props.groupTypeOptions?.inheritedMemberAttributes ?? [];
@@ -1018,6 +1034,7 @@
         // Section 2 Stack 1
         updateRefValue(groupTypeId, props.modelValue.bag?.groupTypeId ?? null);
         updateRefValue(parentGroup, props.modelValue.bag?.parentGroup ?? null);
+        parentGroupIsActive.value = props.modelValue.bag?.parentGroup?.isActive ?? true;
         updateRefValue(campus, props.modelValue.bag?.campus ?? null);
         updateRefValue(statusValueId, props.modelValue.bag?.statusValueId ?? null);
 
@@ -1098,7 +1115,7 @@
 
         // Section 2 Stack 1
         setPropertiesBoxValue(newValue, "groupTypeId", groupTypeId.value);
-        setPropertiesBoxValue(newValue, "parentGroup", parentGroup.value);
+        setPropertiesBoxValue(newValue, "parentGroup", parentGroup.value as ParentGroupBag | null);
         setPropertiesBoxValue(newValue, "campus", campus.value);
         setPropertiesBoxValue(newValue, "statusValueId", statusValueId.value);
 
@@ -1161,6 +1178,61 @@
         setPropertiesBoxValue(newValue, "groupLocations", groupLocations.value);
 
         emit("update:modelValue", newValue);
+    });
+
+    /*
+     * Refresh parentGroupIsActive whenever the picker emits a new
+     * selection. GroupPicker only carries Value/Text, so we round-trip
+     * to GetParentGroupInfo to learn the picked parent's active flag.
+     * Works for both Edit-mode mid-session picks and Add-mode where the
+     * initial bag has no parent at all. Clearing the picker hides the
+     * banner without a server call. Failures default to active so a
+     * transient error doesn't false-positive warn.
+     */
+    watch(() => parentGroup.value?.value, async (newKey) => {
+        if (!newKey) {
+            parentGroupIsActive.value = true;
+            return;
+        }
+
+        const result = await invokeBlockAction<boolean>("GetParentGroupInfo", {
+            parentGroupKey: newKey
+        });
+
+        parentGroupIsActive.value = result.isSuccess && typeof result.data === "boolean"
+            ? result.data
+            : true;
+    });
+
+    /*
+     * Re-filter the Group Type dropdown whenever the parent picker
+     * emits a new selection.
+     */
+    watch(() => parentGroup.value?.value, async (newKey) => {
+        if (!isAddMode.value) {
+            return;
+        }
+
+        const result = await invokeBlockAction<ListItemBag[]>("GetAllowedChildGroupTypes", {
+            parentGroupKey: newKey ?? ""
+        });
+
+        if (result.isSuccess && Array.isArray(result.data)) {
+            allowedGroupTypeItems.value = result.data;
+        }
+    });
+
+    /*
+     * Scroll the GroupType warning into view when the user's current
+     * selection becomes invalid (typically after a parent-change
+     * refilter). Without this, the banner may render below the fold
+     * if the user is scrolled mid-form and the change-of-list happens
+     * silently above their viewport.
+     */
+    watch(isCurrentGroupTypeAllowed, (allowed) => {
+        if (allowed === false) {
+            scrollNotificationIntoView(groupTypeWarningElement);
+        }
     });
 
     // #endregion

@@ -28,10 +28,12 @@ import { Guid } from "@Obsidian/Types";
  * Represents a group requirement that is inherited from a parent
  * (or grandparent) group type. Surfaced read-only in the Section 7
  * "Inherited Requirements" grid on the GroupDetail edit panel.
+ * Mirrors Rock.ViewModels.Blocks.Group.GroupDetail.GroupMemberInheritedAttributeBag in shape.
  */
 export type InheritedGroupRequirementBag = {
     /**
-     * Gets or sets the age classification this requirement applies to.
+     * Gets or sets the age classification this requirement applies
+     * to. The Vue layer maps the enum to its description string.
      */
     appliesToAgeClassification: AppliesToAgeClassification;
 
@@ -41,25 +43,25 @@ export type InheritedGroupRequirementBag = {
      */
     groupRoleName?: string | null;
 
-    /**
-     * Gets or sets the unique identifier.
-     */
+    /** Gets or sets the unique identifier. */
     guid: Guid;
 
     /**
      * Gets or sets the name of the group type this requirement was
-     * inherited from.
+     * inherited from. May differ across rows when the inheritance
+     * chain spans multiple group types.
      */
     inheritedFromGroupTypeName?: string | null;
 
     /**
      * Gets or sets the URL to the group type this requirement was
-     * inherited from.
+     * inherited from. Empty / null renders the name as plain text.
      */
     inheritedFromGroupTypeUrl?: string | null;
 
     /**
-     * Gets or sets the requirement name (from GroupRequirementType.Name).
+     * Gets or sets the requirement name (from
+     * GroupRequirementType.Name).
      */
     name?: string | null;
 };

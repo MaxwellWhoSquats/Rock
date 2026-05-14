@@ -23,28 +23,11 @@
 
 import { Guid } from "@Obsidian/Types";
 
-/**
- * Represents a group-member attribute that is inherited from a
- * parent (or grandparent) group type. Surfaced read-only in the
- * Section 6 "Inherited Attributes" grid on the GroupDetail edit
- * panel.
- */
-export type GroupMemberInheritedAttributeBag = {
-    /** Gets or sets the description. */
-    description?: string | null;
+/** Request bag used to send an identifier for a specific entity to verify if it can be deleted. */
+export type CanDeleteRequestBag = {
+    /** Gets or sets the entity unique identifier. */
+    entityGuid: Guid;
 
-    /** Gets or sets the unique identifier. */
-    guid: Guid;
-
-    /** Gets or sets the name of the group type this attribute was inherited from. */
-    inheritedFromGroupTypeName?: string | null;
-
-    /** Gets or sets the URL to the group type this attribute was inherited from. */
-    inheritedFromGroupTypeUrl?: string | null;
-
-    /** Gets or sets the key. */
-    key?: string | null;
-
-    /** Gets or sets the name. */
-    name?: string | null;
+    /** Gets or sets the entity key identifying the type of entity to check. */
+    entityKey?: string | null;
 };

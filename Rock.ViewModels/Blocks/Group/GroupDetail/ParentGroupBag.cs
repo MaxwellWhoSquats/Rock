@@ -39,5 +39,13 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// text in either case.
         /// </summary>
         public string Url { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether the referenced parent group is currently
+        /// active. Surfaced for the edit-mode inactive-parent warning
+        /// banner. Defaults to <c>true</c> so an unset value is treated
+        /// as non-alarming.
+        /// </summary>
+        public bool IsActive { get; set; } = true;
     }
 }

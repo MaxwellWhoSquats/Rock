@@ -28,7 +28,6 @@ import { ScheduleConfirmationLogic } from "@Obsidian/Enums/Group/scheduleConfirm
 import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
 import { ScheduleType } from "@Obsidian/Enums/Group/scheduleType";
 import { ElevatedSecurityLevel } from "@Obsidian/Enums/Security/elevatedSecurityLevel";
-import { Guid } from "@Obsidian/Types";
 import { FamilyMemberLocationBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/familyMemberLocationBag";
 import { GroupAdministratorBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupAdministratorBag";
 import { GroupDetailGroupTypeBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupDetailGroupTypeBag";
@@ -58,7 +57,7 @@ export type GroupBag = {
     /**
      * Gets or sets the group administrator reference. Inherits
      * Value (PersonAlias Guid) and Text (friendly name)
-     * from ListItemBag; adds a server-resolved profile
+     * from Rock.ViewModels.Utility.ListItemBag; adds a server-resolved profile
      * Url for the view-mode link. Bound to
      * &lt;PersonPicker&gt; in edit mode (the picker reads
      * only Value and Text; Url is repopulated
@@ -80,30 +79,6 @@ export type GroupBag = {
 
     /** Gets or sets the attribute values. */
     attributeValues?: Record<string, string> | null;
-
-    /**
-     * Gets or sets the per-group dropdown source for the Location
-     * modal's Member tab. Built server-side via
-     * BuildFamilyMemberLocationOptions walking
-     * GroupMemberService.GetByGroupId(groupId) →
-     * PersonService.GetFamilies(memberId) →
-     * family.GroupLocations.Where(IsMappedLocation &amp;&amp;
-     * !Previous). Per-group (not per-GroupType) so it lives on
-     * GroupBag instead of GroupTypeOptionsBag per Q6.11.
-     */
-    familyMemberLocationOptions?: FamilyMemberLocationBag[] | null;
-
-    /**
-     * Gets or sets the editable per-group meeting locations
-     * rendered in the Section 4 Stack 2 grid. Each entry carries
-     * the Location-picker emit (Q6.9 discriminator), the active
-     * schedules attached to it (Q6.3 inactive reconciliation runs
-     * server-side), and the capacity matrix configs. Persisted by
-     * the Save action's step 4f via the
-     * SaveGroupLocations helper inside
-     * WrapTransaction.
-     */
-    groupLocations?: GroupLocationStateBag[] | null;
 
     /**
      * Gets or sets the campus selected on the General section's
@@ -180,6 +155,19 @@ export type GroupBag = {
     elevatedSecurityLevel: ElevatedSecurityLevel;
 
     /**
+     * Gets or sets the per-group dropdown source for the Location
+     * modal's Member tab. Built server-side via
+     * BuildFamilyMemberLocationOptions walking
+     * GroupMemberService.GetByGroupId(groupId) →
+     * PersonService.GetFamilies(memberId) →
+     * family.GroupLocations.Where(IsMappedLocation &amp;&amp;
+     * !Previous). Per-group (not per-GroupType) so it lives on
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag instead of
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupTypeOptionsBag per Q6.11.
+     */
+    familyMemberLocationOptions?: FamilyMemberLocationBag[] | null;
+
+    /**
      * Gets or sets the group's capacity. Null when not configured,
      * which hides the row in the view panel and keeps the input
      * blank in edit mode.
@@ -187,9 +175,21 @@ export type GroupBag = {
     groupCapacity?: number | null;
 
     /**
+     * Gets or sets the editable per-group meeting locations
+     * rendered in the Section 4 Stack 2 grid. Each entry carries
+     * the Location-picker emit (Q6.9 discriminator), the active
+     * schedules attached to it (Q6.3 inactive reconciliation runs
+     * server-side), and the capacity matrix configs. Persisted by
+     * the Save action's step 4f via the
+     * SaveGroupLocations helper inside
+     * WrapTransaction.
+     */
+    groupLocations?: GroupLocationStateBag[] | null;
+
+    /**
      * Gets or sets the editable per-group member attribute
      * definitions. Each entry is a full
-     * Utility.PublicEditableAttributeBag so the
+     * Rock.ViewModels.Utility.PublicEditableAttributeBag so the
      * &lt;AttributeEditor&gt; modal can read and write every
      * configurable field (key, name, description, field type,
      * configuration values, categories, default value, etc.).
@@ -202,6 +202,18 @@ export type GroupBag = {
      * GroupDetail.ascx.cs:1338-1357.
      */
     groupMemberAttributes?: PublicEditableAttributeBag[] | null;
+
+    /**
+     * Gets or sets the Member Record Source selected on the
+     * dropdown. ListItemBag.value is the DefinedValue Id (as
+     * a string); ListItemBag.text is the value's display
+     * name. Source: the RECORD_SOURCE_TYPE defined type.
+     * Resolved server-side to
+     * Group.GroupMemberRecordSourceValueId only when
+     * GroupType.AllowGroupSpecificRecordSource is true; the
+     * save flow nulls this otherwise.
+     */
+    groupMemberRecordSource?: ListItemBag | null;
 
     /**
      * Gets or sets the per-group member workflow triggers rendered
@@ -219,28 +231,21 @@ export type GroupBag = {
      * "From Group Type" grid is sourced from
      * GroupTypeOptionsBag.GroupTypeRequirements instead.
      * Persisted by the Save action's step 4c using the
-     * SyncRelatedEntities pattern.
+     * SyncRelatedEntities pattern; new entries land in the
+     * queue and are AddRange'd after the group's Id is
+     * assigned (deferred-insert per
+     * webforms/23-validations-and-cascades.md).
      */
     groupRequirements?: GroupRequirementBag[] | null;
 
     /**
      * Gets or sets the per-group sync rules rendered in the
      * Section 9 grid. Persisted by the Save action's step 4d using
-     * the SyncRelatedEntities pattern.
+     * the SyncRelatedEntities pattern. Each entry maps a
+     * DataView to a role with a sync interval and optional
+     * welcome / exit communications.
      */
     groupSyncs?: GroupSyncBag[] | null;
-
-    /**
-     * Gets or sets the Member Record Source selected on the
-     * dropdown. ListItemBag.value is the DefinedValue Id (as
-     * a string); ListItemBag.text is the value's display
-     * name. Source: the RECORD_SOURCE_TYPE defined type.
-     * Resolved server-side to
-     * Group.GroupMemberRecordSourceValueId only when
-     * GroupType.AllowGroupSpecificRecordSource is true; the
-     * save flow nulls this otherwise.
-     */
-    groupMemberRecordSource?: ListItemBag | null;
 
     /**
      * Gets or sets the group type reference rendered as a chip in
@@ -268,6 +273,17 @@ export type GroupBag = {
      * children check at GroupDetail.ascx.cs:641.
      */
     hasChildGroups: boolean;
+
+    /**
+     * Gets or sets whether this group explicitly overrides the
+     * GroupType's ScheduleCoordinatorNotificationTypes. When
+     * false, Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.ScheduleCoordinatorNotificationTypes
+     * is ignored on save and the entity column is set to
+     * null (inherit). When true, the bitmask in
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.ScheduleCoordinatorNotificationTypes is persisted
+     * (zero flags = explicit None override).
+     */
+    hasCoordinatorNotificationOverride: boolean;
 
     /**
      * Gets or sets the iCalendar content emitted by the Schedule
@@ -428,6 +444,13 @@ export type GroupBag = {
      */
     meetingLocations?: GroupMeetingLocationBag[] | null;
 
+    /**
+     * Gets or sets the count of currently-active members of this
+     * group. Surfaced for the edit-mode capacity-below-members
+     * warning banner. Zero for new (unsaved) groups.
+     */
+    memberCount: number;
+
     /** Gets or sets the friendly name of the group. */
     name?: string | null;
 
@@ -467,7 +490,7 @@ export type GroupBag = {
     /**
      * Gets or sets the parent group reference. Inherits Value
      * (parent group Id as a string) and Text (friendly name)
-     * from ListItemBag; adds a server-resolved detail
+     * from Rock.ViewModels.Utility.ListItemBag; adds a server-resolved detail
      * Url for the view-mode link. Bound to
      * &lt;GroupPicker&gt; in edit mode. Null when the group
      * has no parent.
@@ -553,9 +576,9 @@ export type GroupBag = {
     /**
      * Gets or sets the RSVP reminder system communication override.
      * ListItemBag.value is the SystemCommunication Guid;
-     * ListItemBag.text is the communication title. Null = inherit
-     * from group type's pinned value (read-only when the group type
-     * pins it). Resolved server-side to
+     * ListItemBag.text is the communication title. Null =
+     * inherit from group type's pinned value (read-only when the
+     * group type pins it). Resolved server-side to
      * Group.RSVPReminderSystemCommunicationId.
      */
     rsvpReminderSystemCommunication?: ListItemBag | null;
@@ -568,19 +591,10 @@ export type GroupBag = {
     scheduleConfirmationLogic?: ScheduleConfirmationLogic | null;
 
     /**
-     * Gets or sets whether this group explicitly overrides the
-     * GroupType's ScheduleCoordinatorNotificationTypes. When false,
-     * scheduleCoordinatorNotificationTypes is ignored on save and the
-     * entity column is set to null (inherit). When true, the bitmask
-     * is persisted (zero flags = explicit None override).
-     */
-    hasCoordinatorNotificationOverride: boolean;
-
-    /**
      * Gets or sets the bitmask of coordinator notification types
      * (Accept / Decline / SelfSchedule). Only persisted when
-     * hasCoordinatorNotificationOverride is true; an empty selection
-     * (zero flags set) means
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag.HasCoordinatorNotificationOverride is true;
+     * an empty selection (zero flags set) means
      * Rock.Model.ScheduleCoordinatorNotificationType.None.
      * Persisted to Group.ScheduleCoordinatorNotificationTypes.
      */

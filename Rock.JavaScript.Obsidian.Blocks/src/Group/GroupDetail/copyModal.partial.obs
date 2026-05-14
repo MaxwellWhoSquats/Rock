@@ -5,20 +5,19 @@
            saveText="Copy"
            @save="onSave">
         <NotificationBox alertType="warning">
-            <p>This action will copy the selected group and (optionally) it's child groups. Group members will not be copied.</p>
-            <p>The following items will be included for every copied group:</p>
+            <p>The selected group will be copied. Group members will not be included. The following will be copied for each group:</p>
             <ul>
-                <li>Group member attributes configuration</li>
-                <li>Group attributes configuration and their values</li>
+                <li>Group member attribute configuration</li>
+                <li>Group attribute configuration and their values</li>
                 <li>Schedules</li>
-                <li>Authorization (both authorizations to the group and access to other entities based on membership to the group)</li>
-                <li>Locations (except when the location is a group member address)</li>
+                <li>Authorizations (to the group and to other entities based on group membership)</li>
+                <li>Locations (excluding group member addresses)</li>
                 <li>Group requirements</li>
                 <li>Group syncs</li>
             </ul>
         </NotificationBox>
 
-        <CheckBox v-model="includeChildGroups" label="Include Child Groups" />
+        <InlineCheckBox v-model="includeChildGroups" label="Include Child Groups" />
     </Modal>
 </template>
 
@@ -26,7 +25,7 @@
     import { ref, watch } from "vue";
     import Modal from "@Obsidian/Controls/modal.obs";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
-    import CheckBox from "@Obsidian/Controls/checkBox.obs";
+    import InlineCheckBox from "@Obsidian/Controls/inlineCheckBox.obs";
     import { CopyGroupRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/copyGroupRequestBag";
 
     const props = defineProps<{

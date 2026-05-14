@@ -15,6 +15,7 @@
 // </copyright>
 //
 
+import { nextTick, Ref } from "vue";
 import { ScheduleCoordinatorNotificationType } from "@Obsidian/Enums/Group/scheduleCoordinatorNotificationType";
 import { TimeIntervalUnit } from "@Obsidian/Enums/Core/timeIntervalUnit";
 import { FieldType } from "@Obsidian/SystemGuids/fieldType";
@@ -22,6 +23,25 @@ import { isNullish } from "@Obsidian/Utility/util";
 import { TimePickerValue } from "@Obsidian/ViewModels/Controls/timePickerValue";
 import { TimeIntervalBag } from "@Obsidian/ViewModels/Utility/timeIntervalBag";
 import { PublicEditableAttributeBag } from "@Obsidian/ViewModels/Utility/publicEditableAttributeBag";
+
+/**
+ * Smoothly scrolls a NotificationBox (or any Vue component instance
+ * with a $el root) into view after the next DOM update tick. Used by
+ * the error / warning surfaces in GroupDetail so the user sees the
+ * banner even if they were scrolled mid-form when it appeared. No-ops
+ * when the ref isn't populated.
+ */
+export function scrollNotificationIntoView(notificationRef: Ref<{ $el?: Element } | null | undefined>): void {
+    nextTick(() => {
+        const el = notificationRef.value?.$el;
+        if (el) {
+            el.scrollIntoView({
+                behavior: "smooth",
+                block: "nearest"
+            });
+        }
+    });
+}
 
 /**
  * Converts a 0-1 decimal multiplier into the 0-100 percent integer the

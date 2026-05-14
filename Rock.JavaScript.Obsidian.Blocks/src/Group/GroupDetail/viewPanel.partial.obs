@@ -6,8 +6,9 @@
 
     <NotificationBox v-if="modelValue?.roleLimitWarning"
                      alertType="warning"
-                     heading="Role Limit Warning "
-                     v-html="modelValue.roleLimitWarning" />
+                     heading="Role Limit Warning">
+        <span v-html="modelValue.roleLimitWarning"></span>
+    </NotificationBox>
 
     <div class="row p-spacing-sm">
         <div class="col-md-7">

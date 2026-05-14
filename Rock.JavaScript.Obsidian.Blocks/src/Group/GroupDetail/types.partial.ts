@@ -49,3 +49,17 @@ export const enum BlockActionName {
     ArchiveWithChildren = "ArchiveWithChildren",
     Copy = "Copy"
 }
+
+/**
+ * Discriminator keys for the `CanDeleteEntity` block action. Each grid
+ * that stages child entities in the bag passes the matching key with the
+ * row's Guid so the server can dispatch to the right `Service<T>.CanDelete`
+ * before the row is filtered out of the bag. Values must exactly match
+ * the `EntityKey` constants in `GroupDetail.cs`.
+ */
+export const enum EntityKey {
+    GroupRequirement = "GroupRequirement",
+    GroupMemberWorkflowTrigger = "GroupMemberWorkflowTrigger",
+    GroupSync = "GroupSync",
+    GroupLocation = "GroupLocation"
+}

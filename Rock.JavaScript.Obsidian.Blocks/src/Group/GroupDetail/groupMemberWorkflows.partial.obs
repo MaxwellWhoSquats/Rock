@@ -2,8 +2,8 @@
 <template>
     <ContentSection v-if="isSectionVisible"
                     title="Group Member Workflows"
-                    description="Workflows that run automatically when a member is added, updated, or removed from the group.">
-        <ContentStack headerLocation="top">
+                    icon="ti ti-settings-cog">
+        <ContentStack title="Configure Workflows" description="Workflows that run automatically when a member is added, updated, or removed from the group." headerLocation="top">
             <Grid :data="gridData" keyField="guid" itemTerm="Workflow Trigger" liveUpdates light @addItem="onAdd">
                 <TextColumn name="name" field="name" title="Name" />
                 <TextColumn name="workflow" field="workflow" title="Workflow" />
@@ -30,52 +30,52 @@
 
         <div class="row">
             <div class="col-md-6">
-                <TextBox v-model="workflowTriggerName" label="Name" rules="required" />
+                <TextBox v-model="workflowTriggerName" label="Workflow Trigger Name" rules="required" />
             </div>
             <div class="col-md-6">
                 <CheckBox label="Active" v-model="theWorkflowTrigger.isActive" />
             </div>
         </div>
 
-        <WorkflowTypePicker label="Start Workflow"
+        <WorkflowTypePicker label="Workflow Type"
                             v-model="theWorkflowTrigger.workflowType"
                             rules="required"
                             help="Specifies the workflow type to start when the trigger fires." />
 
-        <DropDownList label="When"
+        <DropDownList label="Trigger Event"
                       v-model="workflowTriggerTypeValue"
                       :items="enumToListItemBag(GroupMemberWorkflowTriggerTypeDescription)" />
 
         <ConditionalWell>
             <div v-if="theWorkflowTrigger.triggerType === GroupMemberWorkflowTriggerType.MemberAddedToGroup
                 || theWorkflowTrigger.triggerType === GroupMemberWorkflowTriggerType.MemberRemovedFromGroup">
-                <DropDownList label="With Status of"
+                <DropDownList label="With Status"
                               v-model="toStatusValue"
                               :items="enumToListItemBag(GroupMemberStatusDescription)"
                               showBlankItem />
-                <DropDownList label="With Role of"
+                <DropDownList label="With Role"
                               v-model="toRoleGuidValue"
                               :items="groupRoleItems"
                               showBlankItem />
             </div>
 
             <div v-if="theWorkflowTrigger.triggerType === GroupMemberWorkflowTriggerType.MemberStatusChanged">
-                <DropDownList label="From Status of"
+                <DropDownList label="From Status"
                               v-model="fromStatusValue"
                               :items="enumToListItemBag(GroupMemberStatusDescription)"
                               showBlankItem />
-                <DropDownList label="To Status of"
+                <DropDownList label="To Status"
                               v-model="toStatusValue"
                               :items="enumToListItemBag(GroupMemberStatusDescription)"
                               showBlankItem />
             </div>
 
             <div v-if="theWorkflowTrigger.triggerType === GroupMemberWorkflowTriggerType.MemberRoleChanged">
-                <DropDownList label="From Role of"
+                <DropDownList label="From Role"
                               v-model="fromRoleGuidValue"
                               :items="groupRoleItems"
                               showBlankItem />
-                <DropDownList label="To Role of"
+                <DropDownList label="To Role"
                               v-model="toRoleGuidValue"
                               :items="groupRoleItems"
                               showBlankItem />
@@ -83,7 +83,7 @@
 
             <div v-if="theWorkflowTrigger.triggerType === GroupMemberWorkflowTriggerType.MemberAttendedGroup">
                 <div class="form-group">
-                    <InlineCheckBox label="First Time"
+                    <InlineCheckBox label="First Attendance Only"
                                     v-model="theWorkflowTrigger.triggerOnFirstAttendance"
                                     help="Select this option if the workflow should only be started when a person attends the group for the first time." />
                 </div>
@@ -91,13 +91,13 @@
 
             <div v-if="theWorkflowTrigger.triggerType === GroupMemberWorkflowTriggerType.MemberPlacedElsewhere">
                 <div class="form-group">
-                    <InlineCheckBox label="Show Note" v-model="theWorkflowTrigger.showNoteOnPlacement"
+                    <InlineCheckBox label="Show Placement Note" v-model="theWorkflowTrigger.showNoteOnPlacement"
                                     help="Select this option if the workflow should show UI for entering a note when the member is placed." />
 
                 </div>
 
                 <div class="form-group">
-                    <InlineCheckBox label="Require Note" v-model="theWorkflowTrigger.requireNoteOnPlacement"
+                    <InlineCheckBox label="Require Placement Note" v-model="theWorkflowTrigger.requireNoteOnPlacement"
                                     help="Select this option if the workflow should show UI for entering a note and make it required when the member is placed." />
                 </div>
             </div>
@@ -124,8 +124,12 @@
     import { enumToListItemBag } from "@Obsidian/Utility/enumUtils";
     import { newGuid } from "@Obsidian/Utility/guid";
     import { escapeHtml } from "@Obsidian/Utility/stringUtils";
+    import { useInvokeBlockAction } from "@Obsidian/Utility/block";
     import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { CanDeleteRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteRequestBag";
+    import { CanDeleteResponseBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteResponseBag";
     import { GroupMemberWorkflowTriggerBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupMemberWorkflowTriggerBag";
+    import { EntityKey } from "./types.partial";
 
     const props = defineProps({
         groupMemberWorkflowTriggers: {
@@ -147,6 +151,8 @@
     }>();
 
     // #region Values
+
+    const invokeBlockAction = useInvokeBlockAction();
 
     const theWorkflowTrigger = ref<GroupMemberWorkflowTriggerBag>(createNewWorkflowTrigger());
 
@@ -249,6 +255,40 @@
 
     // #region Functions
 
+    /*
+     * Builds a comparison key from a trigger's workflow type + the
+     * qualifier fields that actually influence the fire condition for
+     * its triggerType. Irrelevant fields (e.g. a stale toRoleGuid on a
+     * MemberStatusChanged trigger) are excluded so they don't create
+     * phantom "differences" between functionally identical triggers.
+     * showNoteOnPlacement / requireNoteOnPlacement are output-UX
+     * settings, not fire-condition qualifiers, so they're omitted too.
+     */
+    function getDuplicateKey(t: GroupMemberWorkflowTriggerBag): string {
+        const parts: (string | number | boolean | null | undefined)[] = [
+            (t.workflowType?.value ?? "").toLowerCase(),
+            t.triggerType
+        ];
+
+        switch (t.triggerType) {
+            case GroupMemberWorkflowTriggerType.MemberAddedToGroup:
+            case GroupMemberWorkflowTriggerType.MemberRemovedFromGroup:
+                parts.push(t.toStatus ?? "", (t.toRoleGuid ?? "").toLowerCase());
+                break;
+            case GroupMemberWorkflowTriggerType.MemberStatusChanged:
+                parts.push(t.fromStatus ?? "", t.toStatus ?? "");
+                break;
+            case GroupMemberWorkflowTriggerType.MemberRoleChanged:
+                parts.push((t.fromRoleGuid ?? "").toLowerCase(), (t.toRoleGuid ?? "").toLowerCase());
+                break;
+            case GroupMemberWorkflowTriggerType.MemberAttendedGroup:
+                parts.push(t.triggerOnFirstAttendance);
+                break;
+        }
+
+        return parts.join("|");
+    }
+
     function createNewWorkflowTrigger(): GroupMemberWorkflowTriggerBag {
         return {
             guid: "",
@@ -346,8 +386,26 @@
         isModalVisible.value = true;
     }
 
-    function onDelete(guid: string): void {
+    async function onDelete(guid: string): Promise<void> {
+        const result = await invokeBlockAction<CanDeleteResponseBag>("CanDeleteEntity", {
+            request: {
+                entityKey: EntityKey.GroupMemberWorkflowTrigger,
+                entityGuid: guid
+            } as CanDeleteRequestBag
+        });
+
+        if (!result.isSuccess || !result.data) {
+            errorMessage.value = result.errorMessage || "Unable to delete this workflow trigger.";
+            return;
+        }
+
+        if (!result.data.canDelete) {
+            errorMessage.value = result.data.errorMessage || "This workflow trigger cannot be deleted.";
+            return;
+        }
+
         triggers.value = triggers.value.filter(t => t.guid !== guid);
+        errorMessage.value = null;
     }
 
     function onSave(): void {
@@ -357,6 +415,20 @@
         }
 
         const current = triggers.value;
+
+        const newKey = getDuplicateKey(theWorkflowTrigger.value);
+        const duplicate = current.find(t =>
+            t.guid !== theWorkflowTrigger.value.guid
+            && getDuplicateKey(t) === newKey);
+
+        if (duplicate) {
+            const dupName = duplicate.name?.trim();
+            errorMessage.value = dupName
+                ? `A workflow trigger with the same trigger event, workflow, and qualifiers already exists ("${dupName}"). Please change one of those values.`
+                : "A workflow trigger with the same trigger event, workflow, and qualifiers already exists. Please change one of those values.";
+            return;
+        }
+
         const idx = current.findIndex(t => t.guid === theWorkflowTrigger.value.guid);
         if (idx !== -1) {
             const updated = [...current];

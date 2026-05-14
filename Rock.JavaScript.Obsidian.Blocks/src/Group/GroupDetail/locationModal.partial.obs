@@ -50,7 +50,7 @@
                         label="Location Schedule(s)"
                         :multiple="true" />
 
-        <ConditionalWell v-if="isSchedulingEnabled && schedulesValue.length > 0">
+        <ConditionalWell v-if="isSchedulingEnabled && schedulesValue.length > 0 && hasLocationSelected">
             <NotificationBox :alertType="AlertType.Info">
                 Set the <strong>person capacity</strong> for each of the configured schedules below.
             </NotificationBox>
@@ -321,6 +321,25 @@
      * The bit values for Address / Named / Point / Polygon coincide
      * (1, 2, 4, 8) between the two enums.
      */
+    /*
+     * Mirrors the location-selected gate WebForms enforced at the
+     * schedule-picker step (GroupDetail.ascx.cs:3296-3302). The
+     * capacity matrix is meaningless without a Location/Member, so
+     * we hide it until one is picked rather than clearing the user's
+     * schedule selections mid-edit. Save still enforces the same
+     * requirement at onSaveClick.
+     */
+    const hasLocationSelected = computed<boolean>(() => {
+        if (isMemberTabActive.value) {
+            return memberValue.value.length > 0;
+        }
+        if (isOtherTabActive.value) {
+            const v = otherLocationValue.value;
+            return v !== undefined && v !== null;
+        }
+        return false;
+    });
+
     const otherAllowedPickerModes = computed<LocationPickerModeFlag>(() => {
         const mode = props.locationSelectionMode
             & (GroupLocationPickerMode.Address | GroupLocationPickerMode.Named | GroupLocationPickerMode.Point | GroupLocationPickerMode.Polygon);

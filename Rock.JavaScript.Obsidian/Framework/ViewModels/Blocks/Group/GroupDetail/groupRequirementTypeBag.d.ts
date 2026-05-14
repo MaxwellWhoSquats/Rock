@@ -23,7 +23,12 @@
 
 import { DueDateType } from "@Obsidian/Enums/Group/dueDateType";
 
-/** Represents a group requirement type option for the GroupDetail Section 7 modal. */
+/**
+ * Represents a group requirement type option for the GroupDetail
+ * Section 7 modal. Carries the type's Rock.Model.DueDateType
+ * so the modal's DueDate conditional well reacts to the selection
+ * without an extra round-trip.
+ */
 export type GroupRequirementTypeBag = {
     /** Gets or sets the Rock.Model.DueDateType associated with the requirement. */
     dueDateType: DueDateType;

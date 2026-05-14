@@ -2,8 +2,8 @@
 <template>
     <ContentSection v-if="isSectionVisible"
                     title="Group Sync Settings"
-                    description="Define the rules used to sync group members from data views into this group.">
-        <ContentStack headerLocation="top">
+                    icon="ti ti-refresh">
+        <ContentStack title="Configure Sync Rules" description="Define the rules used to sync group members from data views into this group." headerLocation="top">
             <Grid :data="gridData"
                   keyField="guid"
                   itemTerm="Group Sync Rule"
@@ -25,26 +25,30 @@
            saveText="Save"
            cancelText="Cancel"
            :onSave="onSave">
-        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Danger">
             {{ errorMessage }}
         </NotificationBox>
 
-        <DataViewPicker label="Sync Data View"
+        <DataViewPicker label="Data View"
                         v-model="theGroupSync.syncDataView"
                         :entityTypeGuid="EntityType.Person"
                         rules="required"
                         help="Select the Data View for the sync." />
 
-        <DropDownList label="Group Role to Assign"
+        <DropDownList label="Assigned Role"
                       v-model="groupTypeRoleValue"
                       :items="availableRoleItems"
                       rules="required"
                       help="Select the role to assign the members added by the selected Data View." />
 
-        <IntervalPicker label="Sync Interval"
+        <IntervalPicker label="Sync Frequency"
                         v-model="syncIntervalValue"
                         unitPlacement="above"
                         help="Controls how often the group should sync to the Data View. It will never be less than the Group Sync job execution interval." />
+
+        <InlineCheckBox label="Create Login During Sync"
+                        v-model="theGroupSync.addUserAccountsDuringSync"
+                        help="If the individual does not have a login, should one be created during the sync process?" />
 
         <DropDownList label="Welcome Communication"
                       v-model="welcomeCommunicationValue"
@@ -55,10 +59,6 @@
                       v-model="exitCommunicationValue"
                       :items="systemCommunicationItems"
                       showBlankItem />
-
-        <InlineCheckBox label="Create Login During Sync"
-                        v-model="theGroupSync.addUserAccountsDuringSync"
-                        help="If the individual does not have a login, should one be created during the sync process?" />
     </Modal>
 </template>
 
@@ -77,8 +77,12 @@
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { TimeIntervalBag } from "@Obsidian/ViewModels/Utility/timeIntervalBag";
     import { newGuid } from "@Obsidian/Utility/guid";
+    import { useInvokeBlockAction } from "@Obsidian/Utility/block";
     import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { CanDeleteRequestBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteRequestBag";
+    import { CanDeleteResponseBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/canDeleteResponseBag";
     import { GroupSyncBag } from "@Obsidian/ViewModels/Blocks/Group/GroupDetail/groupSyncBag";
+    import { EntityKey } from "./types.partial";
     import { formatScheduleInterval, intervalBagToMinutes, minutesToIntervalBag } from "./utils.partial";
 
     const props = defineProps({
@@ -109,6 +113,8 @@
     }>();
 
     // #region Values
+
+    const invokeBlockAction = useInvokeBlockAction();
 
     const theGroupSync = ref<GroupSyncBag>(createNewGroupSync());
     const isModalVisible = ref(false);
@@ -238,18 +244,50 @@
         if (!selected) {
             return;
         }
-        theGroupSync.value = { ...selected };
         errorMessage.value = null;
+        theGroupSync.value = { ...selected };
         isModalVisible.value = true;
     }
 
-    function onDelete(guid: string): void {
+    async function onDelete(guid: string): Promise<void> {
+        const result = await invokeBlockAction<CanDeleteResponseBag>("CanDeleteEntity", {
+            request: {
+                entityKey: EntityKey.GroupSync,
+                entityGuid: guid
+            } as CanDeleteRequestBag
+        });
+
+        if (!result.isSuccess || !result.data) {
+            errorMessage.value = result.errorMessage || "Unable to delete this group sync.";
+            return;
+        }
+
+        if (!result.data.canDelete) {
+            errorMessage.value = result.data.errorMessage || "This group sync cannot be deleted.";
+            return;
+        }
+
         syncs.value = syncs.value.filter(s => s.guid !== guid);
+        errorMessage.value = null;
     }
 
     function onSave(): void {
         const current = syncs.value;
         const idx = current.findIndex(s => s.guid === theGroupSync.value.guid);
+
+        const newRoleGuid = theGroupSync.value.groupTypeRole?.value;
+        if (newRoleGuid) {
+            const duplicate = current.find(s =>
+                s.guid !== theGroupSync.value.guid
+                && s.groupTypeRole?.value === newRoleGuid);
+
+            if (duplicate) {
+                const roleName = theGroupSync.value.groupTypeRole?.text ?? "the selected role";
+                errorMessage.value = `A sync rule already exists for ${roleName}. Please choose a different role.`;
+                return;
+            }
+        }
+
         if (idx !== -1) {
             const updated = [...current];
             updated.splice(idx, 1, theGroupSync.value);

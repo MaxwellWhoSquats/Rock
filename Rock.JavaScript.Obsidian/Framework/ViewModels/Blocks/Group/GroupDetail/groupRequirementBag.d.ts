@@ -28,14 +28,25 @@ import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 
 /**
  * Represents a single Group Requirement row in the Section 7 grid.
- * Used by both the read-only "From Group Type" grid and the editable
- * "Specific Group Requirements" grid. Scoped to per-group requirements.
+ * Used by both the read-only "From Group Type" grid (sourced from
+ * GroupTypeOptionsBag.GroupTypeRequirements) and the editable
+ * "Specific Group Requirements" grid (sourced from
+ * GroupBag.GroupRequirements). Mirrors the canonical
+ * GroupTypeGroupRequirementBag sibling in
+ * Rock.ViewModels.Blocks.Group.GroupTypeDetail, scoped
+ * to per-group requirements.
  */
 export type GroupRequirementBag = {
-    /** Gets or sets a value indicating whether leaders are allowed to override the requirement. */
+    /**
+     * Gets or sets a value indicating whether leaders are allowed to
+     * override the requirement.
+     */
     allowLeadersToOverride: boolean;
 
-    /** Gets or sets the age classification to which this requirement applies. */
+    /**
+     * Gets or sets the age classification to which this requirement
+     * applies. Default All.
+     */
     appliesToAgeClassification: AppliesToAgeClassification;
 
     /**
@@ -46,21 +57,23 @@ export type GroupRequirementBag = {
 
     /**
      * Gets or sets the group attribute holding the due date when
-     * DueDateType is GroupAttribute. ListItemBag.value is
-     * the Attribute Guid.
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupRequirementBag.DueDateType is GroupAttribute.
+     * ListItemBag.value is the Attribute Guid. Null otherwise.
      */
     dueDateAttribute?: ListItemBag | null;
 
     /**
-     * Gets or sets the static due date when DueDateType is
-     * ConfiguredDate.
+     * Gets or sets the static due date when
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupRequirementBag.DueDateType is ConfiguredDate. Null
+     * otherwise.
      */
     dueDateStaticDate?: string | null;
 
     /**
      * Gets or sets the due date type sourced from the selected
-     * GroupRequirementType. Drives which of the static date /
-     * group attribute the modal renders.
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupRequirementBag.GroupRequirementType. Drives which of
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupRequirementBag.DueDateStaticDate / Rock.ViewModels.Blocks.Group.GroupDetail.GroupRequirementBag.DueDateAttribute
+     * the modal renders.
      */
     dueDateType: DueDateType;
 
@@ -75,14 +88,15 @@ export type GroupRequirementBag = {
 
     /**
      * Gets or sets a value indicating whether members must meet this
-     * requirement before being added.
+     * requirement before being added. WebForms label "Required For
+     * New Members"; redesign label "Required Before Adding".
      */
     mustMeetRequirementToAddMember: boolean;
 
     /**
      * Gets or sets the group role this requirement applies to. Null
-     * applies to all roles. ListItemBag.value is the
-     * GroupTypeRole Guid.
+     * applies the requirement to all roles. ListItemBag.value
+     * is the GroupTypeRole Guid.
      */
     role?: ListItemBag | null;
 };

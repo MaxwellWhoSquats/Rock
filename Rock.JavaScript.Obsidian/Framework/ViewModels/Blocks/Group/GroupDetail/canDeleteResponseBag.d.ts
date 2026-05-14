@@ -21,30 +21,17 @@
 // </copyright>
 //
 
-import { Guid } from "@Obsidian/Types";
-
 /**
- * Represents a group-member attribute that is inherited from a
- * parent (or grandparent) group type. Surfaced read-only in the
- * Section 6 "Inherited Attributes" grid on the GroupDetail edit
- * panel.
+ * Response bag used to indicate whether a specific entity can be deleted,
+ * along with an optional explanation when deletion is not allowed.
  */
-export type GroupMemberInheritedAttributeBag = {
-    /** Gets or sets the description. */
-    description?: string | null;
+export type CanDeleteResponseBag = {
+    /** Gets or sets a value indicating whether the entity can be deleted. */
+    canDelete: boolean;
 
-    /** Gets or sets the unique identifier. */
-    guid: Guid;
-
-    /** Gets or sets the name of the group type this attribute was inherited from. */
-    inheritedFromGroupTypeName?: string | null;
-
-    /** Gets or sets the URL to the group type this attribute was inherited from. */
-    inheritedFromGroupTypeUrl?: string | null;
-
-    /** Gets or sets the key. */
-    key?: string | null;
-
-    /** Gets or sets the name. */
-    name?: string | null;
+    /**
+     * Gets or sets the error message explaining why the entity cannot be deleted.
+     * This value should be null or empty when Rock.ViewModels.Blocks.Group.GroupDetail.CanDeleteResponseBag.CanDelete is true.
+     */
+    errorMessage?: string | null;
 };

@@ -55,12 +55,99 @@ export type GroupTypeOptionsBag = {
     allowedScheduleTypes: ScheduleType;
 
     /**
+     * Gets or sets a value indicating whether the group type
+     * permits group sync rules. Drives the Section 9 panel
+     * visibility (combined with ADMINISTRATE on the group bag and
+     * the presence of any existing syncs).
+     * 
+     * Mirrors `GroupType.AllowGroupSync`. The corresponding
+     * WebForms gate at `GroupDetail.ascx.cs:2195` uses
+     * ADMINISTRATE on the <em>GroupType</em>, with a sticky
+     * override at `:2002` that keeps the panel visible for an
+     * existing group when the user has ADMINISTRATE on the
+     * <em>Group</em>. The Obsidian impl simplifies both into a
+     * single ADMINISTRATE-on-the-Group check on the group bag,
+     * which is the dominant code path under standard Rock auth
+     * (Group auth inherits from GroupType) and avoids the
+     * ViewState stickiness that has no analog here.
+     */
+    allowGroupSync: boolean;
+
+    /**
+     * Gets or sets a value indicating whether more than one
+     * GroupLocation may be added to groups of this type.
+     * Drives the Section 4 Stack 2 grid's Add-button visibility per
+     * WebForms parity at GroupDetail.ascx.cs:3872: the Add
+     * button is shown only when
+     * allowMultipleLocations || locations.length == 0.
+     * Mirrors GroupType.AllowMultipleLocations.
+     */
+    allowMultipleLocations: boolean;
+
+    /**
+     * Gets or sets a value indicating whether the group type
+     * permits per-group attribute definitions for members. Drives
+     * the Section 6 panel-visibility gate (along with the per-user
+     * ADMINISTRATE flag on the group bag) per WebForms parity at
+     * GroupDetail.ascx.cs:2001-2004. Mirrors
+     * GroupType.AllowSpecificGroupMemberAttributes.
+     */
+    allowSpecificGroupMemberAttributes: boolean;
+
+    /**
+     * Gets or sets a value indicating whether the group type
+     * permits per-group member workflow triggers. Drives the
+     * Section 10 panel visibility (combined with the presence of
+     * any legacy triggers) per WebForms parity at
+     * GroupDetail.ascx.cs:2198. Mirrors
+     * GroupType.AllowSpecificGroupMemberWorkflows.
+     */
+    allowSpecificGroupMemberWorkflows: boolean;
+
+    /**
      * Gets or sets a value indicating whether per-location schedule
-     * configuration is enabled. Phase 6 surface; surfaced now to
-     * complete the cascade payload. Mirrors
+     * configuration is enabled. Drives the visibility of the
+     * Schedule(s) multi-picker in the Location modal. Mirrors
      * GroupType.EnableLocationSchedules.
      */
     enableLocationSchedules: boolean;
+
+    /**
+     * Gets or sets a value indicating whether the group type
+     * permits per-group group requirements. Drives the Section 7
+     * "Specific Group Requirements" Add-button visibility plus the
+     * editable-grid wrapper visibility per WebForms parity at
+     * GroupDetail.ascx.cs:4554. Mirrors
+     * GroupType.EnableSpecificGroupRequirements.
+     */
+    enableSpecificGroupRequirements: boolean;
+
+    /**
+     * Gets or sets the date-typed group attribute dropdown options
+     * for the Section 7 modal's Due Date Attribute conditional
+     * well. ListItemBag.value is the Attribute Guid. Sourced
+     * from the inherited attribute chain filtered to
+     * Date / DateTime field types.
+     */
+    groupAttributeOptions?: ListItemBag[] | null;
+
+    /**
+     * Gets or sets the group requirement type dropdown options for
+     * the Section 7 modal. Each entry carries the type's
+     * Rock.Model.DueDateType so the modal's DueDate
+     * conditional well reacts to the selection without an extra
+     * round-trip.
+     */
+    groupRequirementTypeOptions?: GroupRequirementTypeBag[] | null;
+
+    /**
+     * Gets or sets the group role dropdown options for the
+     * Section 7 / 9 / 10 modals. ListItemBag.value is the
+     * GroupTypeRole Guid; ListItemBag.text is the role name.
+     * Sourced from GroupType.Roles on the active group type
+     * (no inheritance walk per WebForms parity).
+     */
+    groupRoleOptions?: ListItemBag[] | null;
 
     /**
      * Gets or sets the icon CSS class sourced from the group type
@@ -76,6 +163,19 @@ export type GroupTypeOptionsBag = {
      * list when GroupType.EnableInactiveReason is false.
      */
     inactiveReasons?: ListItemBag[] | null;
+
+    /**
+     * Gets or sets the read-only inherited group-requirement rows
+     * for the current group type. Walks the
+     * InheritedGroupTypeId chain, mirroring the inheritance
+     * pattern used by InheritedMemberAttributes on
+     * Rock.ViewModels.Blocks.Group.GroupDetail.GroupBag. Each row carries its own
+     * InheritedFromGroupTypeName / InheritedFromGroupTypeUrl
+     * so the grid can render per-row "(Inherited from {link})"
+     * cells. Empty when no ancestor group type defines a
+     * requirement.
+     */
+    inheritedGroupRequirements?: InheritedGroupRequirementBag[] | null;
 
     /**
      * Gets or sets the inherited group-member attribute definitions
@@ -208,17 +308,6 @@ export type GroupTypeOptionsBag = {
     leaderToNonLeaderMultiplierDefault: number;
 
     /**
-     * Gets or sets a value indicating whether more than one
-     * GroupLocation may be added to groups of this type.
-     * Drives the Section 4 Stack 2 grid's Add-button visibility per
-     * WebForms parity at GroupDetail.ascx.cs:3872: the Add
-     * button is shown only when
-     * allowMultipleLocations || locations.length == 0.
-     * Mirrors GroupType.AllowMultipleLocations.
-     */
-    allowMultipleLocations: boolean;
-
-    /**
      * Gets or sets the location-selection mode for the group type.
      * Drives the Section 4 Stack 2 visibility (hidden when
      * None) plus the
@@ -291,9 +380,9 @@ export type GroupTypeOptionsBag = {
     /**
      * Gets or sets the group-type's pinned RSVP reminder system
      * communication. Non-null means the group-type pins this value
-     * and the per-group override is read-only; the ListItemBag.text
-     * is shown as the readonly label. Null means the group can
-     * override.
+     * and the per-group override is read-only; the
+     * ListItemBag.text is shown as the readonly label.
+     * Null means the group can override.
      */
     rsvpReminderSystemCommunication?: ListItemBag | null;
 
@@ -313,63 +402,11 @@ export type GroupTypeOptionsBag = {
     statusValues?: ListItemBag[] | null;
 
     /**
-     * Gets or sets a value indicating whether the group type
-     * permits per-group attribute definitions for members. Drives
-     * the Section 6 panel-visibility gate per WebForms parity.
-     */
-    allowSpecificGroupMemberAttributes: boolean;
-
-    /**
-     * Gets or sets a value indicating whether the group type
-     * permits per-group group requirements. Drives the Section 7
-     * "Specific Group Requirements" Add-button visibility.
-     */
-    enableSpecificGroupRequirements: boolean;
-
-    /**
-     * Gets or sets a value indicating whether the group type
-     * permits group sync rules. Drives the Section 9 panel
-     * visibility per WebForms parity.
-     */
-    allowGroupSync: boolean;
-
-    /**
-     * Gets or sets a value indicating whether the group type
-     * permits per-group member workflow triggers. Drives the
-     * Section 10 panel visibility per WebForms parity.
-     */
-    allowSpecificGroupMemberWorkflows: boolean;
-
-    /**
-     * Gets or sets the read-only inherited group-requirement rows
-     * for the current group type. Each row carries its own
-     * inheritedFromGroupTypeName / inheritedFromGroupTypeUrl so
-     * the grid can render per-row "(Inherited from {link})" cells.
-     */
-    inheritedGroupRequirements?: InheritedGroupRequirementBag[] | null;
-
-    /**
-     * Gets or sets the GroupRequirementType dropdown options for
-     * the Section 7 modal.
-     */
-    groupRequirementTypeOptions?: GroupRequirementTypeBag[] | null;
-
-    /**
-     * Gets or sets the Group Role dropdown options for the
-     * Section 7 / 9 / 10 modals.
-     */
-    groupRoleOptions?: ListItemBag[] | null;
-
-    /**
-     * Gets or sets the date-typed group-attribute dropdown options
-     * for the Section 7 modal's Due Date Attribute conditional
-     * well.
-     */
-    groupAttributeOptions?: ListItemBag[] | null;
-
-    /**
      * Gets or sets the system communication dropdown options for
      * the Section 9 Welcome / Exit dropdowns.
+     * ListItemBag.value is the SystemCommunication Guid;
+     * ListItemBag.text is the communication title. Drives
+     * both Welcome and Exit dropdowns in the Sync modal.
      */
     systemCommunicationOptions?: ListItemBag[] | null;
 };

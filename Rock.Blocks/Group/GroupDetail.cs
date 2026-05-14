@@ -296,6 +296,14 @@ namespace Rock.Blocks.Group
             public const string PageRouting = "Page Routing";
         }
 
+        private static class EntityKey
+        {
+            public const string GroupRequirement = "GroupRequirement";
+            public const string GroupMemberWorkflowTrigger = "GroupMemberWorkflowTrigger";
+            public const string GroupSync = "GroupSync";
+            public const string GroupLocation = "GroupLocation";
+        }
+
         #endregion Keys
 
         #region Fields
@@ -411,7 +419,7 @@ namespace Rock.Blocks.Group
             var options = new GroupDetailOptionsBag
             {
                 PreventSelectingInactiveCampus = GetAttributeValue( AttributeKey.PreventSelectingInactiveCampus ).AsBoolean(),
-                AllowedGroupTypes = BuildAllowedGroupTypeListItems( entity ),
+                AllowedGroupTypes = BuildAllowedGroupTypeListItems( entity?.ParentGroup ),
                 SignatureDocumentTemplates = BuildSignatureDocumentTemplateListItems( entity )
             };
 
@@ -625,6 +633,11 @@ namespace Rock.Blocks.Group
 
             bag.IsCurrentPersonGroupAdministrator = IsCurrentPersonGroupAdministrator();
             bag.IsLimitedToSecurityRoleGroups = GetAttributeValue( AttributeKey.LimittoSecurityRoleGroups ).AsBoolean();
+
+            bag.MemberCount = entity.Id > 0
+                ? new GroupMemberService( RockContext ).Queryable()
+                    .Count( m => m.GroupId == entity.Id && m.GroupMemberStatus == GroupMemberStatus.Active )
+                : 0;
 
             // Section 1 — Inactive flow + photo.
             bag.InactiveReasonValueId = entity.InactiveReasonValueId;
@@ -1017,9 +1030,20 @@ namespace Rock.Blocks.Group
             // redundant query.
             if ( group.ParentGroupId.HasValue )
             {
-                var parentGroup = group.ParentGroup ?? new GroupService( RockContext ).Get( group.ParentGroupId.Value );
+                var groupService = new GroupService( RockContext );
+                var parentGroup = group.ParentGroup ?? groupService.Get( group.ParentGroupId.Value );
                 if ( parentGroup != null )
                 {
+                    if ( group.Id != 0 )
+                    {
+                        var parentAncestorIds = groupService.GetAllAncestorIds( parentGroup.Id ).ToList();
+                        if ( parentAncestorIds.Contains( group.Id ) )
+                        {
+                            errorMessage = $"The '{parentGroup.Name}' group cannot be selected as the parent because it would create a circular reference (the selected parent is already a descendant of this group).";
+                            return false;
+                        }
+                    }
+
                     var allowedGroupTypeIds = GetAllowedGroupTypes( GroupTypeCache.Get( parentGroup.GroupTypeId ), RockContext )
                         .Select( gt => gt.Id )
                         .ToList();
@@ -1049,7 +1073,7 @@ namespace Rock.Blocks.Group
                 errorMessage = group.ValidationResults
                     .Select( r => r.ErrorMessage )
                     .ToList()
-                    .AsDelimited( "; " );
+                    .AsDelimited( "<br />" );
                 return false;
             }
 
@@ -1406,6 +1430,56 @@ namespace Rock.Blocks.Group
         }
 
         /// <summary>
+        /// Returns the allowed child Group Types for the supplied parent
+        /// group key (or the unfiltered allowed list when the key is
+        /// empty). Used in Add mode to re-filter the GroupType dropdown
+        /// whenever the user changes the parent selection so they only
+        /// see types the new parent permits as children.
+        /// </summary>
+        [BlockAction]
+        public BlockActionResult GetAllowedChildGroupTypes( string parentGroupKey )
+        {
+            Model.Group parentGroup = null;
+
+            if ( parentGroupKey.IsNotNullOrWhiteSpace() )
+            {
+                parentGroup = new GroupService( RockContext ).Get( parentGroupKey, !PageCache.Layout.Site.DisablePredictableIds );
+
+                if ( parentGroup == null || !parentGroup.IsAuthorized( Authorization.VIEW, RequestContext.CurrentPerson ) )
+                {
+                    return ActionBadRequest( "Not authorized to view the selected parent group." );
+                }
+            }
+
+            return ActionOk( BuildAllowedGroupTypeListItems( parentGroup ) );
+        }
+
+        /// <summary>
+        /// Returns whether the supplied group is active. Used by the
+        /// inactive-parent warning banner — the GroupPicker's emit only
+        /// carries the picked group's key/text, so the client re-fetches
+        /// the active flag whenever the parent selection changes (and
+        /// during Add mode where there's no initial bag value).
+        /// </summary>
+        [BlockAction]
+        public BlockActionResult GetParentGroupInfo( string parentGroupKey )
+        {
+            if ( parentGroupKey.IsNullOrWhiteSpace() )
+            {
+                return ActionBadRequest( "Parent group key is required." );
+            }
+
+            var parentGroup = new GroupService( RockContext ).Get( parentGroupKey, !PageCache.Layout.Site.DisablePredictableIds );
+
+            if ( parentGroup == null || !parentGroup.IsAuthorized( Authorization.VIEW, RequestContext.CurrentPerson ) )
+            {
+                return ActionBadRequest( "Not authorized to view the selected parent group." );
+            }
+
+            return ActionOk( parentGroup.IsActive );
+        }
+
+        /// <summary>
         /// Returns the bag for entering edit mode. Existing groups load via
         /// <see cref="TryGetEntityForEditAction(string, out Model.Group, out BlockActionResult)"/>;
         /// the Add path constructs a fresh entity in that same call and
@@ -1687,7 +1761,7 @@ namespace Rock.Blocks.Group
 
             if ( !entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
             {
-                return ActionBadRequest( "You are not authorized to delete this group." );
+                return ActionBadRequest( $"Not authorized to delete {Model.Group.FriendlyTypeName}." );
             }
 
             if ( !groupService.CanDelete( entity, out var errorMessage, includeSecondLvl: true ) )
@@ -1754,7 +1828,7 @@ namespace Rock.Blocks.Group
 
             if ( !entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
             {
-                return ActionBadRequest( "You are not authorized to archive this group." );
+                return ActionBadRequest( $"Not authorized to archive {Model.Group.FriendlyTypeName}." );
             }
 
             var personAliasId = RequestContext.CurrentPerson?.PrimaryAliasId;
@@ -1783,7 +1857,7 @@ namespace Rock.Blocks.Group
 
             if ( !entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
             {
-                return ActionBadRequest( "You are not authorized to archive this group." );
+                return ActionBadRequest( $"Not authorized to archive {Model.Group.FriendlyTypeName}." );
             }
 
             var personAliasId = RequestContext.CurrentPerson?.PrimaryAliasId;
@@ -1822,7 +1896,7 @@ namespace Rock.Blocks.Group
 
             if ( !entity.IsAuthorized( Authorization.EDIT, RequestContext.CurrentPerson ) )
             {
-                return ActionBadRequest( "You are not authorized to copy the group." );
+                return ActionBadRequest( $"Not authorized to copy {Model.Group.FriendlyTypeName}." );
             }
 
             var copyOptions = new CopyGroupOptions
@@ -1853,6 +1927,82 @@ namespace Rock.Blocks.Group
             }
 
             return ActionOk( this.GetCurrentPageUrl( qryParams ) );
+        }
+
+        /// <summary>
+        /// Checks whether a specific child entity can be deleted, surfaced
+        /// from the in-bag grids (Requirements, Syncs, Workflow Triggers,
+        /// Locations). The Vue side calls this from each grid's onDelete
+        /// before filtering the row out of the staged bag, mirroring the
+        /// pattern used by GroupTypeDetail and ConnectionTypeDetail. Returns
+        /// <c>CanDelete = true</c> when the entity is not found in the DB
+        /// (newly-added rows that exist only in the bag), since there is
+        /// nothing for the server to validate against.
+        /// </summary>
+        /// <param name="request">The request that identifies the entity to check.</param>
+        /// <returns>A response indicating whether the entity can be deleted.</returns>
+        [BlockAction]
+        public BlockActionResult CanDeleteEntity( CanDeleteRequestBag request )
+        {
+            if ( request == null || request.EntityGuid == Guid.Empty || request.EntityKey.IsNullOrWhiteSpace() )
+            {
+                return ActionBadRequest( "Invalid entity." );
+            }
+
+            var entityKey = request.EntityKey;
+            string errorMessage;
+            bool canDelete;
+
+            if ( entityKey == EntityKey.GroupRequirement )
+            {
+                var service = new GroupRequirementService( RockContext );
+                var entity = service.Get( request.EntityGuid );
+                if ( entity == null )
+                {
+                    return ActionOk( new CanDeleteResponseBag { CanDelete = true } );
+                }
+
+                canDelete = service.CanDelete( entity, out errorMessage );
+            }
+            else if ( entityKey == EntityKey.GroupMemberWorkflowTrigger )
+            {
+                var service = new GroupMemberWorkflowTriggerService( RockContext );
+                var entity = service.Get( request.EntityGuid );
+                if ( entity == null )
+                {
+                    return ActionOk( new CanDeleteResponseBag { CanDelete = true } );
+                }
+
+                canDelete = service.CanDelete( entity, out errorMessage );
+            }
+            else if ( entityKey == EntityKey.GroupSync )
+            {
+                var service = new GroupSyncService( RockContext );
+                var entity = service.Get( request.EntityGuid );
+                if ( entity == null )
+                {
+                    return ActionOk( new CanDeleteResponseBag { CanDelete = true } );
+                }
+
+                canDelete = service.CanDelete( entity, out errorMessage );
+            }
+            else if ( entityKey == EntityKey.GroupLocation )
+            {
+                var service = new GroupLocationService( RockContext );
+                var entity = service.Get( request.EntityGuid );
+                if ( entity == null )
+                {
+                    return ActionOk( new CanDeleteResponseBag { CanDelete = true } );
+                }
+
+                canDelete = service.CanDelete( entity, out errorMessage );
+            }
+            else
+            {
+                return ActionBadRequest( $"Unknown entity: {entityKey}" );
+            }
+
+            return ActionOk( new CanDeleteResponseBag { CanDelete = canDelete, ErrorMessage = errorMessage } );
         }
 
         #endregion Block Actions
@@ -1985,7 +2135,8 @@ namespace Rock.Blocks.Group
             {
                 Value = parentGroup.Guid.ToString(),
                 Text = parentGroup.Name,
-                Url = ResolveEntityUrl( typeof( Model.Group ), parentGroup, fallbackUrl: $"/Group/{parentGroup.IdKey}" )
+                Url = ResolveEntityUrl( typeof( Model.Group ), parentGroup, fallbackUrl: $"/Group/{parentGroup.IdKey}" ),
+                IsActive = parentGroup.IsActive
             };
         }
 
@@ -2207,7 +2358,7 @@ namespace Rock.Blocks.Group
 
                 case ScheduleType.Weekly:
                     bag.ScheduleType = ScheduleType.Weekly;
-                    bag.WeeklyDayOfWeek = schedule.WeeklyDayOfWeek;
+                    bag.WeeklyDayOfWeek = ( int? ) schedule.WeeklyDayOfWeek;
                     bag.WeeklyTimeOfDay = schedule.WeeklyTimeOfDay?.ToString();
                     break;
             }
@@ -2276,10 +2427,15 @@ namespace Rock.Blocks.Group
                 }
             }
 
-            // Validation gate 4 — Weekly requires a DayOfWeek.
-            if ( scheduleType == ScheduleType.Weekly && !bag.WeeklyDayOfWeek.HasValue )
+            // Validation gate 4 — Weekly requires both a DayOfWeek and a
+            // parseable TimeOfDay.
+            if ( scheduleType == ScheduleType.Weekly )
             {
-                scheduleType = ScheduleType.None;
+                if ( !bag.WeeklyDayOfWeek.HasValue
+                    || !ParseTimeSpanOrNull( bag.WeeklyTimeOfDay ).HasValue )
+                {
+                    scheduleType = ScheduleType.None;
+                }
             }
 
             if ( scheduleType == ScheduleType.Custom || scheduleType == ScheduleType.Weekly )
@@ -2316,7 +2472,7 @@ namespace Rock.Blocks.Group
                 else // Weekly
                 {
                     entity.Schedule.iCalendarContent = null;
-                    entity.Schedule.WeeklyDayOfWeek = bag.WeeklyDayOfWeek;
+                    entity.Schedule.WeeklyDayOfWeek = ( DayOfWeek? ) bag.WeeklyDayOfWeek;
                     entity.Schedule.WeeklyTimeOfDay = ParseTimeSpanOrNull( bag.WeeklyTimeOfDay );
                 }
             }
@@ -2417,14 +2573,15 @@ namespace Rock.Blocks.Group
 
         /// <summary>
         /// Builds the Group Type dropdown payload for the Add panel. Uses
-        /// the entity's parent group type (when known) as the "parent"
-        /// filter argument so the dropdown only contains group types the
-        /// parent allows as children.
+        /// the supplied parent group's type (when known) as the filter
+        /// argument so the dropdown only contains group types that
+        /// parent allows as children. Pass <c>null</c> to retrieve the
+        /// unconstrained list.
         /// </summary>
-        private List<ListItemBag> BuildAllowedGroupTypeListItems( Model.Group entity )
+        private List<ListItemBag> BuildAllowedGroupTypeListItems( Model.Group parentGroup )
         {
-            var parentGroupType = entity?.ParentGroup != null
-                ? GroupTypeCache.Get( entity.ParentGroup.GroupTypeId )
+            var parentGroupType = parentGroup != null
+                ? GroupTypeCache.Get( parentGroup.GroupTypeId )
                 : null;
 
             return GetAllowedGroupTypes( parentGroupType, RockContext )
@@ -3642,36 +3799,98 @@ namespace Rock.Blocks.Group
                 return new List<FamilyMemberLocationBag>();
             }
 
-            var groupMemberService = new GroupMemberService( RockContext );
-            var personService = new PersonService( RockContext );
+            var familyGroupTypeId = GroupTypeCache.GetFamilyGroupType()?.Id;
+            if ( !familyGroupTypeId.HasValue )
+            {
+                return new List<FamilyMemberLocationBag>();
+            }
 
             var previousLocationTypeGuid = Rock.SystemGuid.DefinedValue.GROUP_LOCATION_TYPE_PREVIOUS.AsGuid();
+            var groupMemberService = new GroupMemberService( RockContext );
+
+            // Load each group member with the Person + PrimaryAlias navigation
+            // hydrated. GetByGroupId already includes Person + GroupRole and
+            // filters out deceased members; the extra Include avoids a
+            // lazy-load when reading PrimaryAlias.Guid below.
+            var members = groupMemberService.GetByGroupId( entity.Id )
+                .Include( gm => gm.Person.PrimaryAlias )
+                .AsNoTracking()
+                .Where( gm => gm.Person != null && gm.Person.PrimaryAliasId.HasValue )
+                .ToList();
+
+            if ( !members.Any() )
+            {
+                return new List<FamilyMemberLocationBag>();
+            }
+
+            // Resolve every (PersonId → FamilyGroupId) link for those members
+            // in one query — replaces the original per-member GetFamilies()
+            // round-trip. Families are ordered by GroupOrder (primary family
+            // first) to mirror PersonService.GetFamilies; the order survives
+            // the .Distinct() because LINQ-to-objects emits first-occurrence.
+            var personIds = members.Select( gm => gm.PersonId ).Distinct().ToList();
+            var familyIdsByPersonId = groupMemberService.Queryable()
+                .AsNoTracking()
+                .Where( gm => personIds.Contains( gm.PersonId )
+                    && gm.Group.GroupTypeId == familyGroupTypeId.Value )
+                .Select( gm => new { gm.PersonId, FamilyId = gm.GroupId, gm.GroupOrder } )
+                .ToList()
+                .GroupBy( x => x.PersonId )
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderBy( x => x.GroupOrder ?? int.MaxValue )
+                        .Select( x => x.FamilyId )
+                        .Distinct()
+                        .ToList() );
+
+            if ( !familyIdsByPersonId.Any() )
+            {
+                return new List<FamilyMemberLocationBag>();
+            }
+
+            // Load every relevant family GroupLocation (mapped + non-Previous)
+            // with the Location and GroupLocationTypeValue navigations hydrated
+            // so the loop below does not lazy-load per row.
+            var allFamilyIds = familyIdsByPersonId.Values.SelectMany( ids => ids ).Distinct().ToList();
+            var familyLocationsById = new GroupLocationService( RockContext ).Queryable()
+                .AsNoTracking()
+                .Include( gl => gl.Location )
+                .Include( gl => gl.GroupLocationTypeValue )
+                .Where( gl => allFamilyIds.Contains( gl.GroupId )
+                    && gl.IsMappedLocation
+                    && gl.GroupLocationTypeValue != null
+                    && gl.GroupLocationTypeValue.Guid != previousLocationTypeGuid
+                    && gl.Location != null )
+                .ToList()
+                .GroupBy( gl => gl.GroupId )
+                .ToDictionary( g => g.Key, g => g.ToList() );
 
             var options = new List<FamilyMemberLocationBag>();
             var seen = new HashSet<(Guid LocationGuid, Guid PersonAliasGuid)>();
 
-            foreach ( var member in groupMemberService.GetByGroupId( entity.Id ) )
+            foreach ( var member in members )
             {
-                if ( member.Person == null )
-                {
-                    continue;
-                }
-
-                var primaryAlias = member.Person.PrimaryAlias;
+                var primaryAlias = member.Person?.PrimaryAlias;
                 if ( primaryAlias == null )
                 {
                     continue;
                 }
 
-                foreach ( var family in personService.GetFamilies( member.PersonId ) )
+                if ( !familyIdsByPersonId.TryGetValue( member.PersonId, out var familyIds ) )
                 {
-                    foreach ( var familyGroupLocation in family.GroupLocations
-                        .Where( l => l.IsMappedLocation
-                            && l.GroupLocationTypeValue != null
-                            && l.GroupLocationTypeValue.Guid != previousLocationTypeGuid
-                            && l.Location != null ) )
+                    continue;
+                }
+
+                foreach ( var familyId in familyIds )
+                {
+                    if ( !familyLocationsById.TryGetValue( familyId, out var locations ) )
                     {
-                        var key = (familyGroupLocation.Location.Guid, primaryAlias.Guid);
+                        continue;
+                    }
+
+                    foreach ( var gl in locations )
+                    {
+                        var key = (gl.Location.Guid, primaryAlias.Guid);
                         if ( !seen.Add( key ) )
                         {
                             continue;
@@ -3679,9 +3898,9 @@ namespace Rock.Blocks.Group
 
                         options.Add( new FamilyMemberLocationBag
                         {
-                            LocationGuid = familyGroupLocation.Location.Guid,
+                            LocationGuid = gl.Location.Guid,
                             PersonAliasGuid = primaryAlias.Guid,
-                            Text = $"{member.Person.FullName} {familyGroupLocation.GroupLocationTypeValue.Value} ({familyGroupLocation.Location})"
+                            Text = $"{member.Person.FullName} {gl.GroupLocationTypeValue.Value} ({gl.Location})"
                         } );
                     }
                 }
@@ -3830,7 +4049,22 @@ namespace Rock.Blocks.Group
             var groupMemberAssignmentService = new GroupMemberAssignmentService( RockContext );
             var locationService = new LocationService( RockContext );
             var scheduleService = new ScheduleService( RockContext );
-            var personAliasService = new PersonAliasService( RockContext );
+
+            // Bulk-resolve the PersonAlias Guids referenced by the Member-tab
+            // locations so the upsert loop below does not fire a round-trip
+            // per row. Empty when no member-tab rows are present.
+            var personAliasGuids = bagList
+                .Where( b => b.GroupMemberPersonAliasGuid.HasValue )
+                .Select( b => b.GroupMemberPersonAliasGuid.Value )
+                .Distinct()
+                .ToList();
+
+            var personAliasIdByGuid = personAliasGuids.Any()
+                ? new PersonAliasService( RockContext ).Queryable()
+                    .Where( pa => personAliasGuids.Contains( pa.Guid ) )
+                    .Select( pa => new { pa.Guid, pa.Id } )
+                    .ToDictionary( pa => pa.Guid, pa => pa.Id )
+                : new Dictionary<Guid, int>();
 
             // Reload the persisted GroupLocations with their navigations so
             // we can diff against the incoming bags. The entity's
@@ -3967,8 +4201,11 @@ namespace Rock.Blocks.Group
                     : null;
 
                 // Resolve the Member-tab PersonAlias if present (Q6.13).
+                // Reads from the bulk-resolved dictionary built before this
+                // loop so no per-iteration DB round-trip fires.
                 existing.GroupMemberPersonAliasId = bag.GroupMemberPersonAliasGuid.HasValue
-                    ? personAliasService.GetSelect( bag.GroupMemberPersonAliasGuid.Value, pa => ( int? ) pa.Id )
+                        && personAliasIdByGuid.TryGetValue( bag.GroupMemberPersonAliasGuid.Value, out var resolvedAliasId )
+                    ? ( int? ) resolvedAliasId
                     : null;
 
                 // 3. Schedule reconciliation (Q6.3) — union active

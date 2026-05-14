@@ -27,7 +27,7 @@
  * the parent's friendly name; the picker-shaped base lets the
  * edit-mode &lt;GroupPicker&gt; bind to the same field. The
  * view-mode Overview card additionally renders a link using the
- * pre-resolved Url, which prefers the Group
+ * pre-resolved Rock.ViewModels.Blocks.Group.GroupDetail.ParentGroupBag.Url, which prefers the Group
  * EntityType.LinkUrlLavaTemplate (so customer-customized
  * link rules are honored) and falls back to /Group/{IdKey}.
  */
@@ -37,6 +37,14 @@ export type ParentGroupBag = {
 
     /** Gets or sets disabled for this item. */
     disabled?: boolean | null;
+
+    /**
+     * Gets or sets whether the referenced parent group is currently
+     * active. Surfaced for the edit-mode inactive-parent warning
+     * banner. Defaults to true so an unset value is treated
+     * as non-alarming.
+     */
+    isActive: boolean;
 
     /** Gets or sets the text. */
     text?: string | null;

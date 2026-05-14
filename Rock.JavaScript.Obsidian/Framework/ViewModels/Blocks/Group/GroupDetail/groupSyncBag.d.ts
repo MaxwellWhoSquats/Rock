@@ -38,7 +38,8 @@ export type GroupSyncBag = {
 
     /**
      * Gets or sets the exit system communication sent on removal.
-     * ListItemBag.value is the SystemCommunication Guid.
+     * ListItemBag.value is the SystemCommunication Guid. Null
+     * to skip sending.
      */
     exitSystemCommunication?: ListItemBag | null;
 
@@ -54,12 +55,14 @@ export type GroupSyncBag = {
 
     /**
      * Gets or sets the date/time of the last successful sync run.
-     * Display only.
+     * Display only — populated by the Group Sync job, never written
+     * by this block.
      */
     lastRefreshDateTime?: string | null;
 
     /**
      * Gets or sets the interval (in minutes) between sync runs.
+     * Bound to &lt;IntervalPicker&gt; in the modal.
      */
     scheduleIntervalMinutes?: number | null;
 
@@ -71,7 +74,8 @@ export type GroupSyncBag = {
 
     /**
      * Gets or sets the welcome system communication sent on add.
-     * ListItemBag.value is the SystemCommunication Guid.
+     * ListItemBag.value is the SystemCommunication Guid. Null
+     * to skip sending.
      */
     welcomeSystemCommunication?: ListItemBag | null;
 };

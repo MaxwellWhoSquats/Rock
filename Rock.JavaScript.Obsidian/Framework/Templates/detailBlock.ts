@@ -987,7 +987,7 @@ export default defineComponent({
         </span>
     </template>
 
-    <template v-if="showLabels && (showLabelsInHeader || (headerLabels && headerLabels.length))" #panelLabels>
+    <template v-if="(showLabels && showLabelsInHeader) || (!showLabelsInHeader && headerLabels && headerLabels.length)" #panelLabels>
         <div class="label-group">
             <span v-for="action in (showLabelsInHeader ? labels : headerLabels)" :class="getClassForLabelAction(action)" :style="action.style" :title="action.tooltip" @click="onActionClick(action, $event)">
                 <i v-if="action.iconCssClass" :class="action.iconCssClass"></i>

@@ -236,6 +236,13 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         public bool HasChildGroups { get; set; }
 
         /// <summary>
+        /// Gets or sets the count of currently-active members of this
+        /// group. Surfaced for the edit-mode capacity-below-members
+        /// warning banner. Zero for new (unsaved) groups.
+        /// </summary>
+        public int MemberCount { get; set; }
+
+        /// <summary>
         /// Gets or sets a value indicating whether the current user is a
         /// member of the GROUP_ADMINISTRATORS system group. Drives the
         /// visibility of the "Enable as Security Role" checkbox in
@@ -455,9 +462,13 @@ namespace Rock.ViewModels.Blocks.Group.GroupDetail
         /// Gets or sets the day-of-week selected when
         /// <see cref="ScheduleType"/> is <c>Weekly</c>. Null otherwise.
         /// Persisted to <c>Schedule.WeeklyDayOfWeek</c> on the inline
-        /// schedule.
+        /// schedule. Stored as <see cref="int"/> rather than
+        /// <see cref="DayOfWeek"/> because the Obsidian code-gen tool
+        /// has no TypeScript mapping for the BCL <c>System.DayOfWeek</c>
+        /// enum; the values still align 1:1 with the enum members
+        /// (Sunday = 0 ... Saturday = 6).
         /// </summary>
-        public DayOfWeek? WeeklyDayOfWeek { get; set; }
+        public int? WeeklyDayOfWeek { get; set; }
 
         /// <summary>
         /// Gets or sets the time-of-day selected when

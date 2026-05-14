@@ -38,7 +38,6 @@
                        :allowedGroupTypes="allowedGroupTypes"
                        :signatureDocumentTemplates="signatureDocumentTemplates"
                        :preventSelectingInactiveCampus="preventSelectingInactiveCampus"
-                       :errorMessage="errorMessage"
                        @propertyChanged="baseBlock.onPropertyChanged" />
         </template>
     </DetailBlock>
@@ -78,6 +77,7 @@
     import EditPanel from "./GroupDetail/editPanel.partial.obs";
     import CopyModal from "./GroupDetail/copyModal.partial.obs";
     import { BlockActionName, NavigationUrlKey } from "./GroupDetail/types.partial";
+    import { scrollNotificationIntoView } from "./GroupDetail/utils.partial";
 
     const config = useConfigurationValues<DetailBlockBox<GroupBag, GroupDetailOptionsBag>>();
     const invokeBlockAction = useInvokeBlockAction();
@@ -311,7 +311,7 @@
         }
         else {
             errorMessage.value = result.errorMessage ?? "Unable to fetch options for this Group Type.";
-            scrollToErrorNotification();
+            scrollNotificationIntoView(errorMessageElement);
         }
     });
 
@@ -325,22 +325,6 @@
             });
         }
     });
-
-    /**
-    * Smoothly scrolls the error NotificationBox into view after the DOM
-    * has had a chance to render it. Used by every server-error path so
-    * the user sees the message even if they were scrolled mid-form.
-    */
-    function scrollToErrorNotification(): void {
-        nextTick(() => {
-            if (errorMessageElement.value?.$el) {
-                errorMessageElement.value.$el.scrollIntoView({
-                    behavior: "smooth",
-                    block: "nearest",
-                });
-            }
-        });
-    }
 
     // #endregion
 
@@ -392,7 +376,7 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to enter edit mode.";
-        scrollToErrorNotification();
+        scrollNotificationIntoView(errorMessageElement);
         return false;
     }
 
@@ -404,6 +388,25 @@
      */
     async function onSave(): Promise<boolean | string> {
         errorMessage.value = "";
+
+        // Security Role transition guard. Compare the local edit bag to
+        // the last-fetched view bag; if isSecurityRole changed in either
+        // direction, prompt before persisting. The server clears the
+        // auth cache on transition (GroupDetail.cs Save) so this is
+        // never a silent change.
+        const wasSecurityRole = groupViewBag.value?.isSecurityRole === true;
+        const isNowSecurityRole = groupEditBag.value?.bag?.isSecurityRole === true;
+
+        if (wasSecurityRole !== isNowSecurityRole) {
+            const message = isNowSecurityRole
+                ? "This group will be a Security Role, which allows it to grant permissions throughout Rock. Continue?"
+                : "Removing this group's Security Role designation will revoke any permissions granted by it. Continue?";
+
+            const confirmed = await confirm(message);
+            if (!confirmed) {
+                return false;
+            }
+        }
 
         const result = await invokeBlockAction<ValidPropertiesBox<GroupBag> | string>(BlockActionName.Save, {
             box: groupEditBag.value
@@ -420,7 +423,7 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unknown error while trying to save group.";
-        scrollToErrorNotification();
+        scrollNotificationIntoView(errorMessageElement);
         return false;
     }
 
@@ -445,7 +448,7 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to delete the group.";
-        scrollToErrorNotification();
+        scrollNotificationIntoView(errorMessageElement);
         return false;
     }
 
@@ -481,7 +484,7 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to archive the group.";
-        scrollToErrorNotification();
+        scrollNotificationIntoView(errorMessageElement);
     }
 
     /** "Yes" from the archive-children prompt: cascade to descendants. */
@@ -527,7 +530,7 @@
         }
 
         errorMessage.value = result.errorMessage ?? "Unable to copy the group.";
-        scrollToErrorNotification();
+        scrollNotificationIntoView(errorMessageElement);
     }
 
     // #endregion

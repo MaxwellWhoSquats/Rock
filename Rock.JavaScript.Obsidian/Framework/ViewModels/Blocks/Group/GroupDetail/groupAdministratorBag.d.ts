@@ -27,7 +27,7 @@
  * administrator's friendly name; the picker-shaped base lets the
  * edit-mode &lt;PersonPicker&gt; bind to the same field. The
  * view-mode Overview card additionally renders a link using the
- * pre-resolved Url, which prefers the Person
+ * pre-resolved Rock.ViewModels.Blocks.Group.GroupDetail.GroupAdministratorBag.Url, which prefers the Person
  * EntityType.LinkUrlLavaTemplate (so customer-customized
  * link rules are honored) and falls back to /Person/{IdKey}.
  */
